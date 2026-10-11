@@ -550,24 +550,64 @@ DASHBOARD_HTML = """
         if (typeof parsed === 'object' && (parsed.mobile || parsed.phone) && (parsed.xo || parsed.token)) return [parsed];
       } catch(e) {}
 
+      // Balanced brace scanner for concatenated / space / newline separated JSONs with nested objects
       const found = [];
-      const regex = /\{[^{}]*"xo"[^{}]*\}/g;
-      let m;
-      while ((m = regex.exec(text)) !== null) {
-        try {
-          const obj = JSON.parse(m[0]);
-          if ((obj.mobile || obj.phone) && obj.xo) found.push(obj);
-        } catch(e) {}
+      let depth = 0;
+      let start = -1;
+      let inString = false;
+      let escape = false;
+
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '"' && !escape) {
+          inString = !inString;
+        } else if (c === '\\' && inString) {
+          escape = !escape;
+          continue;
+        } else if (!inString) {
+          if (c === '{') {
+            if (depth === 0) start = i;
+            depth++;
+          } else if (c === '}') {
+            depth--;
+            if (depth === 0 && start !== -1) {
+              const chunk = text.substring(start, i + 1);
+              try {
+                const obj = JSON.parse(chunk);
+                if (obj && (obj.mobile || obj.phone) && (obj.xo || obj.token)) {
+                  found.push(obj);
+                }
+              } catch(e) {}
+              start = -1;
+            }
+          }
+        }
+        escape = false;
       }
+
+      if (found.length > 0) return found;
+
+      // Fallback: line by line
+      for (const line of text.split('\n')) {
+        const l = line.trim().replace(/,$/, '');
+        if (l.startsWith('{') && l.endsWith('}')) {
+          try {
+            const obj = JSON.parse(l);
+            if (obj && (obj.mobile || obj.phone) && (obj.xo || obj.token)) found.push(obj);
+          } catch(e) {}
+        }
+      }
+
       if (found.length > 0) return found;
 
       const xoMatches = text.match(/"xo"\s*:/gi);
-      if (xoMatches) return Array(xoMatches.length).fill({mobile: "Account", xo: "dummy"});
+      if (xoMatches) return Array(xoMatches.length).fill({mobile: "Account", xo: ""});
       return [];
     }
 
     function checkTokenExpiry(xoStr) {
       try {
+        if (!xoStr || typeof xoStr !== 'string') return null;
         const parts = xoStr.split('.');
         if (parts.length < 2) return null;
         let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -636,24 +676,25 @@ DASHBOARD_HTML = """
     async function handleJobSubmit(e) {
       e.preventDefault();
       const rawText = document.getElementById('json-input').value.trim();
+      if (!rawText) {
+        alert("Please paste your Meesho account JSON before submitting.");
+        return;
+      }
+
       const accounts = detectAccounts(rawText);
       const serviceType = document.querySelector('input[name="service_type"]:checked').value;
       const ratingMode = document.getElementById('rating-mode').value;
       const reviewMode = document.querySelector('input[name="review_mode"]:checked').value;
       const comments = document.getElementById('review-comments').value.trim();
 
-      if (accounts.length === 0) {
-        alert("No valid Meesho account JSONs detected. Please ensure your input includes 'mobile' and 'xo' tokens.");
-        return;
-      }
-
       const pricePerItem = serviceType === 'auto_pilot' ? priceAutoPilot : priceStandard;
-      const totalCost = accounts.length * pricePerItem;
+      const estimatedCount = accounts.length || 1;
+      const totalCost = estimatedCount * pricePerItem;
 
       // 1. Client-side Wallet Balance Validation
       if (userBalance < totalCost) {
         const deficit = totalCost - userBalance;
-        if (confirm(`⚠️ Insufficient Wallet Balance!\n\nYou submitted ${accounts.length} account(s) which requires ₹${totalCost.toFixed(2)} (₹${pricePerItem}/order), but your current balance is ₹${userBalance.toFixed(2)}.\n\nYou need to add ₹${deficit.toFixed(2)} to proceed.\n\nWould you like to open the Wallet top-up page now?`)) {
+        if (confirm(`⚠️ Insufficient Wallet Balance!\n\nYou submitted ${estimatedCount} account(s) which requires ₹${totalCost.toFixed(2)} (₹${pricePerItem}/order), but your current balance is ₹${userBalance.toFixed(2)}.\n\nYou need to add ₹${deficit.toFixed(2)} to proceed.\n\nWould you like to open the Wallet top-up page now?`)) {
           window.location.href = '/wallet';
         }
         return;
