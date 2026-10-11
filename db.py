@@ -20,6 +20,16 @@ if IS_POSTGRES:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+    # Handle unencoded special characters (e.g. '@' in database password)
+    if "://" in DATABASE_URL:
+        scheme, rest = DATABASE_URL.split("://", 1)
+        if "@" in rest and rest.count("@") > 1:
+            auth_part, host_part = rest.rsplit("@", 1)
+            if ":" in auth_part:
+                user_part, pwd_part = auth_part.split(":", 1)
+                encoded_pwd = urllib.parse.quote(pwd_part, safe="")
+                DATABASE_URL = f"{scheme}://{user_part}:{encoded_pwd}@{host_part}"
+
     # Clean query parameters unsupported by psycopg2 / libpq (e.g. pgbouncer=true)
     try:
         parsed_url = urllib.parse.urlparse(DATABASE_URL)
@@ -231,10 +241,17 @@ def init_db():
             """)
 
         # Migrate existing tables if columns are missing
-        try:
-            db.execute("ALTER TABLE transactions ADD COLUMN gateway_order_id TEXT")
-        except Exception:
-            pass
+        if db.is_pg:
+            try:
+                db.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS gateway_order_id TEXT")
+                db.conn.commit()
+            except Exception:
+                db.conn.rollback()
+        else:
+            try:
+                db.execute("ALTER TABLE transactions ADD COLUMN gateway_order_id TEXT")
+            except Exception:
+                pass
 
         # Default Settings (0rs signup bonus, 50rs min topup, 10rs and 7rs default prices)
         default_settings = {
