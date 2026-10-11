@@ -436,21 +436,29 @@ def get_all_users() -> List[Dict[str, Any]]:
 
 
 def update_user_balance(user_id: int, delta: float, tx_type: str, notes: str = "", utr: str = "", gateway_order_id: str = "") -> bool:
+    """
+    Atomically updates a user's wallet balance.
+    If delta is negative (deduction), uses an atomic conditional WHERE clause to guarantee no overdrawing.
+    """
     with DBConnection() as db:
-        db.execute("SELECT wallet_balance FROM users WHERE id = ?", (user_id,))
-        row = db.fetchone()
-        if not row:
-            return False
+        if delta < 0:
+            deduct_amount = round(abs(delta), 2)
+            db.execute(
+                "UPDATE users SET wallet_balance = wallet_balance - ? WHERE id = ? AND wallet_balance >= ?",
+                (deduct_amount, user_id, deduct_amount),
+            )
+            if db.cursor.rowcount == 0:
+                return False  # Atomic check failed: Insufficient balance
+        else:
+            add_amount = round(delta, 2)
+            db.execute("UPDATE users SET wallet_balance = wallet_balance + ? WHERE id = ?", (add_amount, user_id))
+            if db.cursor.rowcount == 0:
+                return False
 
-        new_bal = row["wallet_balance"] + delta
-        if new_bal < 0:
-            return False  # Insufficient funds
-
-        db.execute("UPDATE users SET wallet_balance = ? WHERE id = ?", (new_bal, user_id))
         now = datetime.now().isoformat()
         db.execute(
             "INSERT INTO transactions (user_id, amount, type, status, utr_ref, notes, gateway_order_id, created_at) VALUES (?, ?, ?, 'COMPLETED', ?, ?, ?, ?)",
-            (user_id, abs(delta), tx_type, utr, notes, gateway_order_id, now),
+            (user_id, abs(round(delta, 2)), tx_type, utr, notes, gateway_order_id, now),
         )
         return True
 
@@ -540,13 +548,36 @@ def get_user_stats(user_id: int) -> Dict[str, Any]:
 # ------------------------------------------------------------
 # Transaction / Payment Operations
 # ------------------------------------------------------------
+def is_utr_already_used(utr_ref: str) -> bool:
+    """Returns True if this UTR has already been submitted in any PENDING or COMPLETED deposit."""
+    clean = (utr_ref or "").strip()
+    if not clean or clean.upper() == "FAMGATEWAY":
+        return False
+    with DBConnection() as db:
+        db.execute(
+            "SELECT id FROM transactions WHERE UPPER(utr_ref) = UPPER(?) AND status IN ('PENDING', 'COMPLETED')",
+            (clean,),
+        )
+        return db.fetchone() is not None
+
+
 def create_deposit_request(user_id: int, amount: float, utr_ref: str, gateway_order_id: str = "") -> int:
+    """Creates a new deposit request with anti-duplicate fraud prevention."""
+    clean_utr = (utr_ref or "").strip()
+    clean_amt = round(float(amount), 2)
+    if clean_amt <= 0:
+        raise ValueError("Invalid deposit amount.")
+
+    if clean_utr and clean_utr.upper() != "FAMGATEWAY":
+        if is_utr_already_used(clean_utr):
+            raise ValueError("This UPI UTR reference number has already been submitted or processed. Duplicate submissions are not accepted.")
+
     now = datetime.now().isoformat()
     with DBConnection() as db:
         tx_id = db.insert_get_id("""
             INSERT INTO transactions (user_id, amount, type, status, utr_ref, notes, gateway_order_id, created_at)
             VALUES (?, ?, 'DEPOSIT', 'PENDING', ?, 'Payment request', ?, ?)
-        """, (user_id, amount, utr_ref.strip(), gateway_order_id, now))
+        """, (user_id, clean_amt, clean_utr, gateway_order_id, now))
         return tx_id
 
 
@@ -559,6 +590,16 @@ def get_user_transactions(user_id: int) -> List[Dict[str, Any]]:
             ORDER BY id DESC
         """, (user_id,))
         return db.fetchall()
+
+
+def get_transaction_by_gateway_order(gateway_order_id: str) -> Optional[Dict[str, Any]]:
+    with DBConnection() as db:
+        db.execute("""
+            SELECT id, user_id, amount, type, status, utr_ref, notes, gateway_order_id, created_at
+            FROM transactions
+            WHERE gateway_order_id = ?
+        """, (gateway_order_id,))
+        return db.fetchone()
 
 
 def get_pending_deposits() -> List[Dict[str, Any]]:
@@ -574,6 +615,7 @@ def get_pending_deposits() -> List[Dict[str, Any]]:
 
 
 def approve_deposit(tx_id: int) -> bool:
+    """Atomically approves a pending deposit, preventing double-crediting."""
     with DBConnection() as db:
         db.execute("SELECT user_id, amount, status FROM transactions WHERE id = ?", (tx_id,))
         row = db.fetchone()
@@ -581,9 +623,13 @@ def approve_deposit(tx_id: int) -> bool:
             return False
 
         user_id = row["user_id"]
-        amount = row["amount"]
+        amount = round(float(row["amount"]), 2)
 
-        db.execute("UPDATE transactions SET status = 'COMPLETED', notes = 'Approved by Admin' WHERE id = ?", (tx_id,))
+        # Atomic conditional status update to prevent race conditions
+        db.execute("UPDATE transactions SET status = 'COMPLETED', notes = 'Approved by Admin' WHERE id = ? AND status = 'PENDING'", (tx_id,))
+        if db.cursor.rowcount == 0:
+            return False
+
         db.execute("UPDATE users SET wallet_balance = wallet_balance + ? WHERE id = ?", (amount, user_id))
         return True
 
@@ -591,22 +637,32 @@ def approve_deposit(tx_id: int) -> bool:
 def reject_deposit(tx_id: int) -> bool:
     with DBConnection() as db:
         db.execute("UPDATE transactions SET status = 'REJECTED', notes = 'Rejected by Admin' WHERE id = ? AND status = 'PENDING'", (tx_id,))
-        return True
+        return db.cursor.rowcount > 0
 
 
-def complete_gateway_deposit(gateway_order_id: str) -> bool:
-    """Auto-credits wallet when FamGateway confirms an order."""
+def complete_gateway_deposit(gateway_order_id: str, verified_amount: Optional[float] = None) -> bool:
+    """
+    Atomically auto-credits wallet when FamGateway confirms an order.
+    Guarantees idempotency and prevents double-crediting.
+    """
     with DBConnection() as db:
         db.execute("SELECT id, user_id, amount, status FROM transactions WHERE gateway_order_id = ?", (gateway_order_id,))
         row = db.fetchone()
-        if not row or row["status"] == "COMPLETED":
+        if not row or row["status"] != "PENDING":
             return False
 
         tx_id = row["id"]
         user_id = row["user_id"]
-        amount = row["amount"]
+        amount = round(float(verified_amount), 2) if verified_amount is not None else round(float(row["amount"]), 2)
 
-        db.execute("UPDATE transactions SET status = 'COMPLETED', notes = 'Verified by FamGateway' WHERE id = ?", (tx_id,))
+        # Atomic conditional update
+        db.execute(
+            "UPDATE transactions SET status = 'COMPLETED', amount = ?, notes = 'Verified by FamGateway' WHERE id = ? AND status = 'PENDING'",
+            (amount, tx_id),
+        )
+        if db.cursor.rowcount == 0:
+            return False  # Already completed concurrently
+
         db.execute("UPDATE users SET wallet_balance = wallet_balance + ? WHERE id = ?", (amount, user_id))
         return True
 

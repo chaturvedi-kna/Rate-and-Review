@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
+import re
 import sys
-from datetime import datetime
+import time
+
+logger = logging.getLogger("meesho_app")
+from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Dict, Any, List
@@ -26,6 +32,24 @@ import famgateway_client
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "meesho-studio-secret-key-2026-safe")
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.permanent_session_lifetime = timedelta(days=7)
+
+# ------------------------------------------------------------
+# In-Memory Security & Rate Limiting
+# ------------------------------------------------------------
+_RATE_LIMITS: Dict[str, List[float]] = {}
+
+def is_rate_limited(key: str, max_calls: int = 10, window_secs: int = 60) -> bool:
+    """Enforces in-memory rate limiting per key (e.g., user ID or IP)."""
+    now = time.time()
+    history = [t for t in _RATE_LIMITS.get(key, []) if now - t < window_secs]
+    if len(history) >= max_calls:
+        return True
+    history.append(now)
+    _RATE_LIMITS[key] = history
+    return False
 
 
 # ------------------------------------------------------------
@@ -58,44 +82,48 @@ def admin_required(f):
 # ------------------------------------------------------------
 BASE_NAV = """
 <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-50">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-    <div class="flex items-center space-x-3">
-      <a href="/" class="flex items-center gap-3 group">
-        <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-fuchsia-600 to-pink-500 flex items-center justify-center shadow-lg shadow-pink-500/20 group-hover:scale-105 transition-transform">
-          <i class="fa-solid fa-star text-white text-lg"></i>
+  <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 min-h-[3.75rem] py-2 sm:py-0 flex items-center justify-between gap-2">
+    <div class="flex items-center space-x-2 sm:space-x-3 shrink-0">
+      <a href="/" class="flex items-center gap-2 sm:gap-3 group">
+        <div class="h-9 w-9 sm:h-10 sm:w-10 rounded-xl bg-gradient-to-tr from-fuchsia-600 to-pink-500 flex items-center justify-center shadow-lg shadow-pink-500/20 group-hover:scale-105 transition-transform shrink-0">
+          <i class="fa-solid fa-star text-white text-base sm:text-lg"></i>
         </div>
         <div>
-          <h1 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+          <h1 class="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-1.5 sm:gap-2 leading-none sm:leading-tight">
             Meesho Studio
             {% if session.role == 'admin' %}
-            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">ADMIN</span>
+            <span class="text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">ADMIN</span>
             {% else %}
-            <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20">CLIENT</span>
+            <span class="text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-400 border border-pink-500/20">CLIENT</span>
             {% endif %}
           </h1>
-          <p class="text-[11px] text-slate-400">Automated Reviews & Account Manager</p>
+          <p class="text-[10px] sm:text-[11px] text-slate-400 hidden sm:block">Automated Reviews & Account Manager</p>
         </div>
       </a>
     </div>
     
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-1.5 sm:gap-3 shrink-0">
       <!-- Wallet Pill -->
-      <a href="/wallet" class="flex items-center gap-2 bg-slate-800/90 hover:bg-slate-700/80 px-3.5 py-1.5 rounded-xl border border-slate-700 transition">
-        <i class="fa-solid fa-wallet text-emerald-400 text-sm"></i>
-        <span class="text-xs text-slate-300">Balance: <strong class="text-emerald-400 font-mono">₹{{ "%.2f"|format(user.wallet_balance) }}</strong></span>
-        <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded ml-1 font-semibold">+ Top Up</span>
+      <a href="/wallet" class="flex items-center gap-1.5 sm:gap-2 bg-slate-800/90 hover:bg-slate-700/80 px-2.5 sm:px-3.5 py-1.5 rounded-xl border border-slate-700 transition" title="Wallet Balance">
+        <i class="fa-solid fa-wallet text-emerald-400 text-xs sm:text-sm"></i>
+        <span class="text-xs text-slate-300">
+          <span class="hidden md:inline">Balance: </span>
+          <strong class="text-emerald-400 font-mono">₹{{ "%.2f"|format(user.wallet_balance) }}</strong>
+        </span>
+        <span class="text-[9px] sm:text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-semibold hidden xs:inline">+ Top Up</span>
       </a>
 
       {% if session.role == 'admin' %}
-      <a href="/admin" class="text-xs bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 px-3 py-1.5 rounded-xl border border-amber-500/30 transition flex items-center gap-1.5 font-medium">
-        <i class="fa-solid fa-shield-halved"></i> Admin Panel
+      <a href="/admin" class="text-xs bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 px-2.5 sm:px-3 py-1.5 rounded-xl border border-amber-500/30 transition flex items-center gap-1 font-medium" title="Admin Control Panel">
+        <i class="fa-solid fa-shield-halved"></i>
+        <span class="hidden sm:inline">Admin</span>
       </a>
       {% endif %}
 
-      <div class="h-4 w-px bg-slate-800 mx-1"></div>
+      <div class="h-4 w-px bg-slate-800 mx-0.5 sm:mx-1"></div>
 
       <!-- Password Change Button -->
-      <button onclick="openPasswordModal()" title="Change Password" class="text-xs text-slate-300 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-slate-800 transition flex items-center gap-1.5">
+      <button type="button" onclick="openPasswordModal()" title="Change Password" class="text-xs text-slate-300 hover:text-white p-2 sm:px-2.5 sm:py-1.5 rounded-lg hover:bg-slate-800 transition flex items-center gap-1.5 cursor-pointer">
         <i class="fa-solid fa-key text-slate-400"></i>
         <span class="hidden sm:inline">{{ user.username }}</span>
       </button>
@@ -173,33 +201,38 @@ DASHBOARD_HTML = """
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Inter', sans-serif; }
+    html, body {
+      font-family: 'Inter', sans-serif;
+      overflow-x: hidden;
+      max-width: 100vw;
+      touch-action: manipulation;
+    }
     .font-mono { font-family: 'JetBrains Mono', monospace; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
   """ + BASE_NAV + """
 
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
+  <main class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-6 flex-1 w-full space-y-5 sm:space-y-6">
 
     <!-- User Metrics Row -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-      <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
+      <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between">
         <div>
-          <p class="text-xs text-slate-400 font-medium">Orders Submitted</p>
-          <p class="text-2xl font-bold text-white mt-1">{{ stats.submitted }}</p>
+          <p class="text-[11px] sm:text-xs text-slate-400 font-medium">Submitted</p>
+          <p class="text-xl sm:text-2xl font-bold text-white mt-1">{{ stats.submitted }}</p>
         </div>
-        <div class="h-10 w-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center text-lg">
+        <div class="h-9 w-9 sm:h-10 sm:w-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center text-base sm:text-lg shrink-0">
           <i class="fa-solid fa-paper-plane"></i>
         </div>
       </div>
 
-      <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+      <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between">
         <div>
-          <p class="text-xs text-emerald-400 font-medium">Reviewed & Completed</p>
-          <p class="text-2xl font-bold text-emerald-400 mt-1">{{ stats.completed }}</p>
+          <p class="text-[11px] sm:text-xs text-emerald-400 font-medium">Completed</p>
+          <p class="text-xl sm:text-2xl font-bold text-emerald-400 mt-1">{{ stats.completed }}</p>
         </div>
-        <div class="h-10 w-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-lg">
+        <div class="h-9 w-9 sm:h-10 sm:w-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-base sm:text-lg shrink-0">
           <i class="fa-solid fa-circle-check"></i>
         </div>
       </div>
@@ -321,11 +354,11 @@ DASHBOARD_HTML = """
           </div>
         </div>
 
-        <div class="flex items-center justify-between pt-2">
-          <p id="cost-estimate" class="text-xs text-slate-400 font-mono">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+          <p id="cost-estimate" class="text-xs text-slate-400 font-mono text-center sm:text-left">
             Wallet Balance: <strong class="text-emerald-400">₹{{ "%.2f"|format(user.wallet_balance) }}</strong>
           </p>
-          <button type="submit" id="btn-submit" class="bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white font-medium text-xs py-2.5 px-6 rounded-xl shadow-lg shadow-pink-600/20 transition flex items-center gap-2">
+          <button type="submit" id="btn-submit" class="w-full sm:w-auto justify-center bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white font-medium text-xs py-3 sm:py-2.5 px-6 rounded-xl shadow-lg shadow-pink-600/20 transition flex items-center gap-2 cursor-pointer">
             <i class="fa-solid fa-play"></i>
             Submit & Start Reviewing
           </button>
@@ -335,17 +368,71 @@ DASHBOARD_HTML = """
 
     <!-- Review Tasks History -->
     <div class="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-      <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900">
+      <div class="px-5 sm:px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900">
         <h3 class="text-sm font-semibold text-white flex items-center gap-2">
           <i class="fa-solid fa-list-check text-pink-500"></i>
           Your Review Submissions History
         </h3>
-        <button onclick="location.reload()" class="text-xs text-slate-400 hover:text-white transition">
+        <button onclick="location.reload()" class="text-xs text-slate-400 hover:text-white transition cursor-pointer">
           <i class="fa-solid fa-rotate-right mr-1"></i> Refresh
         </button>
       </div>
 
-      <div class="overflow-x-auto">
+      <!-- Mobile Tasks Card List (small screens) -->
+      <div class="sm:hidden divide-y divide-slate-800/60 font-sans">
+        {% if tasks %}
+          {% for t in tasks %}
+          <div class="p-4 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="font-mono font-medium text-white text-xs">+91 {{ t.mobile }}</span>
+              <div>
+                {% if t.status == 'COMPLETED' %}
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <i class="fa-solid fa-check mr-1"></i> Completed
+                  </span>
+                {% elif t.status == 'PROCESSING' %}
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
+                    <i class="fa-solid fa-spinner fa-spin mr-1"></i> Reviewing
+                  </span>
+                {% elif t.status == 'FAILED' %}
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20" title="{{ t.error_message }}">
+                    <i class="fa-solid fa-xmark mr-1"></i> Failed (Refunded)
+                  </span>
+                {% else %}
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+                    Pending
+                  </span>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="text-xs text-slate-300">
+              <span class="font-medium text-slate-200 block truncate">{{ t.product_title or 'Meesho Order' }}</span>
+              {% if t.order_id %}<span class="text-[10px] text-slate-500 font-mono">Order #{{ t.order_id }}</span>{% endif %}
+            </div>
+
+            {% if t.comments %}
+            <div class="bg-slate-950/60 border border-slate-800/80 rounded-lg p-2 text-xs">
+              <span class="text-amber-400 font-bold mr-1">{{ t.rating_stars }}★</span>
+              <span class="text-slate-300 text-[11px]">{{ t.comments }}</span>
+            </div>
+            {% endif %}
+
+            <div class="flex items-center justify-between text-[11px] pt-1 border-t border-slate-800/40">
+              <span class="font-mono text-emerald-400 font-semibold">₹{{ "%.2f"|format(t.cost) }}</span>
+              <span class="text-slate-500 font-mono text-[10px]">{{ t.created_at[:16].replace('T', ' ') }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="p-8 text-center text-slate-500 text-xs">
+            No review submissions yet. Paste your accounts above to begin!
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- Desktop Table (large screens) -->
+      <div class="hidden sm:block overflow-x-auto">
         <table class="w-full text-left text-xs border-collapse">
           <thead>
             <tr class="border-b border-slate-800 text-slate-400 bg-slate-950/40">
@@ -504,14 +591,19 @@ WALLET_HTML = """
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Inter', sans-serif; }
+    html, body {
+      font-family: 'Inter', sans-serif;
+      overflow-x: hidden;
+      max-width: 100vw;
+      touch-action: manipulation;
+    }
     .font-mono { font-family: 'JetBrains Mono', monospace; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
   """ + BASE_NAV + """
 
-  <main class="max-w-4xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8">
+  <main class="max-w-4xl mx-auto px-3 sm:px-6 py-6 sm:py-8 flex-1 w-full space-y-6 sm:space-y-8">
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -525,22 +617,22 @@ WALLET_HTML = """
     {% endwith %}
 
     <!-- Wallet Balance Overview -->
-    <div class="bg-gradient-to-r from-slate-900 to-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-2xl">
+    <div class="bg-gradient-to-r from-slate-900 to-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-2xl">
       <div>
-        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Your Current Balance</span>
+        <span class="text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400">Your Current Balance</span>
         <h2 class="text-3xl sm:text-4xl font-extrabold text-emerald-400 font-mono mt-1">₹{{ "%.2f"|format(user.wallet_balance) }}</h2>
         <p class="text-xs text-slate-400 mt-1">Funds are deducted automatically when starting reviews and refunded if any task fails.</p>
       </div>
-      <a href="#payment-section" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs px-5 py-3 rounded-xl shadow-lg shadow-emerald-600/20 transition flex items-center gap-2">
+      <a href="#payment-section" class="w-full sm:w-auto text-center justify-center bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs px-5 py-3 rounded-xl shadow-lg shadow-emerald-600/20 transition flex items-center gap-2">
         <i class="fa-solid fa-arrow-down"></i> Add Funds via UPI
       </a>
     </div>
 
     <!-- UPI Top-up Section (Automated Primary + Manual Fallback) -->
-    <div id="payment-section" class="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+    <div id="payment-section" class="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-8 shadow-xl space-y-6">
       <div class="border-b border-slate-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <h3 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
             <i class="fa-solid fa-wallet text-pink-500"></i>
             Add Funds to Wallet
           </h3>
@@ -549,11 +641,11 @@ WALLET_HTML = """
           </p>
         </div>
         <!-- Method Selector Pills -->
-        <div class="inline-flex p-1 bg-slate-950 border border-slate-800 rounded-xl text-xs shrink-0">
-          <button type="button" id="tab-auto" onclick="switchTopupMethod('auto')" class="px-3.5 py-1.5 rounded-lg font-semibold transition bg-pink-600 text-white shadow">
+        <div class="w-full sm:w-auto grid grid-cols-2 sm:inline-flex p-1 bg-slate-950 border border-slate-800 rounded-xl text-xs gap-1 sm:gap-0 shrink-0">
+          <button type="button" id="tab-auto" onclick="switchTopupMethod('auto')" class="px-3.5 py-2 sm:py-1.5 rounded-lg font-semibold transition bg-pink-600 text-white shadow text-center cursor-pointer">
             ⚡ Instant Auto UPI
           </button>
-          <button type="button" id="tab-manual" onclick="switchTopupMethod('manual')" class="px-3.5 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white">
+          <button type="button" id="tab-manual" onclick="switchTopupMethod('manual')" class="px-3.5 py-2 sm:py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white text-center cursor-pointer">
             📝 Manual Transfer
           </button>
         </div>
@@ -575,17 +667,17 @@ WALLET_HTML = """
           <label class="block text-xs font-semibold text-slate-300 mb-1.5">Enter Amount to Add (₹):</label>
           <div class="relative max-w-md">
             <span class="absolute left-3.5 top-2.5 text-xs text-slate-400 font-mono font-bold">₹</span>
-            <input type="number" id="auto-deposit-amount" min="{{ settings.min_topup_amount }}" step="1" required value="{{ settings.min_topup_amount }}" class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3.5 py-2.5 text-sm font-mono text-emerald-400 focus:outline-none focus:border-pink-500">
+            <input type="number" id="auto-deposit-amount" inputmode="numeric" min="{{ settings.min_topup_amount }}" step="1" required value="{{ settings.min_topup_amount }}" class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3.5 py-2.5 text-sm font-mono text-emerald-400 focus:outline-none focus:border-pink-500">
           </div>
-          <div class="flex flex-wrap gap-2 mt-2">
-            <button type="button" onclick="setAutoAmount(50)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-800 transition">₹50</button>
-            <button type="button" onclick="setAutoAmount(100)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-800 transition">₹100</button>
-            <button type="button" onclick="setAutoAmount(250)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-800 transition">₹250</button>
-            <button type="button" onclick="setAutoAmount(500)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-800 transition">₹500</button>
+          <div class="grid grid-cols-4 gap-2 mt-2 max-w-md">
+            <button type="button" onclick="setAutoAmount(50)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 py-2 rounded-lg border border-slate-800 transition text-center cursor-pointer">₹50</button>
+            <button type="button" onclick="setAutoAmount(100)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 py-2 rounded-lg border border-slate-800 transition text-center cursor-pointer">₹100</button>
+            <button type="button" onclick="setAutoAmount(250)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 py-2 rounded-lg border border-slate-800 transition text-center cursor-pointer">₹250</button>
+            <button type="button" onclick="setAutoAmount(500)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 py-2 rounded-lg border border-slate-800 transition text-center cursor-pointer">₹500</button>
           </div>
         </div>
 
-        <button type="button" onclick="payWithFamGateway()" id="btn-famgateway" class="w-full max-w-md bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white font-semibold text-xs py-3.5 rounded-xl shadow-lg shadow-pink-600/25 transition flex items-center justify-center gap-2">
+        <button type="button" onclick="payWithFamGateway()" id="btn-famgateway" class="w-full max-w-md bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white font-semibold text-xs sm:text-sm py-3.5 rounded-xl shadow-lg shadow-pink-600/25 transition flex items-center justify-center gap-2 cursor-pointer">
           <i class="fa-solid fa-bolt"></i>
           Proceed to Instant UPI Checkout
         </button>
@@ -594,7 +686,7 @@ WALLET_HTML = """
           <p class="text-[11px] text-slate-400 flex items-center gap-2">
             <i class="fa-solid fa-circle-info text-amber-400"></i>
             <span>If automated checkout is down or having gateway issues,
-              <button type="button" onclick="switchTopupMethod('manual')" class="text-pink-400 hover:text-pink-300 underline font-semibold ml-1">click here for Manual UPI Transfer</button>.
+              <button type="button" onclick="switchTopupMethod('manual')" class="text-pink-400 hover:text-pink-300 underline font-semibold ml-1 cursor-pointer">click here for Manual UPI Transfer</button>.
             </span>
           </p>
         </div>
@@ -612,117 +704,170 @@ WALLET_HTML = """
           </div>
         </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-            <!-- QR Code Display -->
-            <div class="md:col-span-5 flex flex-col items-center justify-center p-6 bg-slate-950 border border-slate-800 rounded-2xl">
-              <img id="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa={{ settings.upi_id }}%26pn={{ settings.upi_name|default('Meesho')|replace(' ', '%20') }}%26cu=INR" alt="UPI QR" class="w-48 h-48 rounded-xl bg-white p-2">
-              <p class="text-[11px] text-slate-400 mt-3 font-medium text-center">Scan with any UPI App (GPay, PhonePe, Paytm)</p>
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-8 items-center">
+          <!-- QR Code Display -->
+          <div class="md:col-span-5 flex flex-col items-center justify-center p-5 bg-slate-950 border border-slate-800 rounded-2xl">
+            <img id="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa={{ settings.upi_id }}%26pn={{ settings.upi_name|default('Meesho')|replace(' ', '%20') }}%26cu=INR" alt="UPI QR" class="w-40 h-40 sm:w-48 sm:h-48 rounded-xl bg-white p-2 shadow-lg">
+            <p class="text-[11px] text-slate-400 mt-2.5 font-medium text-center">Scan with any UPI App (GPay, PhonePe, Paytm)</p>
+            
+            <!-- Direct Mobile Deeplink Button -->
+            <a href="upi://pay?pa={{ settings.upi_id }}&pn={{ settings.upi_name|default('Meesho')|replace(' ', '%20') }}&cu=INR" class="mt-3 w-full max-w-xs text-center bg-pink-600/20 hover:bg-pink-600/30 text-pink-300 border border-pink-500/30 text-xs font-semibold py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2">
+              <i class="fa-solid fa-mobile-screen-button"></i> Open in UPI App (GPay / PhonePe)
+            </a>
+          </div>
+
+          <!-- Manual Form -->
+          <div class="md:col-span-7 space-y-4">
+            <div class="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
+              <span class="text-[11px] text-slate-400 block font-medium">Receiver UPI ID:</span>
+              <div class="flex items-center justify-between gap-2">
+                <span id="upi-id-text" class="text-sm font-mono text-pink-400 font-bold truncate">{{ settings.upi_id }}</span>
+                <button type="button" onclick="copyUPI()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg border border-slate-700 transition cursor-pointer shrink-0">
+                  <i class="fa-regular fa-copy mr-1"></i> Copy
+                </button>
+              </div>
+              <span class="text-[10px] text-slate-500 block">Name: {{ settings.upi_name }}</span>
             </div>
 
-            <!-- Manual Form -->
-            <div class="md:col-span-7 space-y-4">
-              <div class="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
-                <span class="text-[11px] text-slate-400 block font-medium">Receiver UPI ID:</span>
-                <div class="flex items-center justify-between">
-                  <span id="upi-id-text" class="text-sm font-mono text-pink-400 font-bold">{{ settings.upi_id }}</span>
-                  <button type="button" onclick="copyUPI()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg border border-slate-700 transition cursor-pointer">
-                    <i class="fa-regular fa-copy mr-1"></i> Copy
-                  </button>
-                </div>
-                <span class="text-[10px] text-slate-500 block">Name: {{ settings.upi_name }}</span>
+            <form id="manual-topup-form" onsubmit="handleManualTopupSubmit(event)" class="space-y-3.5">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">Transferred Amount (₹):</label>
+                <input type="number" id="manual-deposit-amount" inputmode="numeric" min="{{ settings.min_topup_amount }}" step="1" required value="{{ settings.min_topup_amount }}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono text-emerald-400 focus:outline-none focus:border-pink-500">
               </div>
 
-              <form id="manual-topup-form" onsubmit="handleManualTopupSubmit(event)" class="space-y-3.5">
-                <div>
-                  <label class="block text-xs font-semibold text-slate-300 mb-1">Transferred Amount (₹):</label>
-                  <input type="number" id="manual-deposit-amount" min="{{ settings.min_topup_amount }}" step="1" required value="{{ settings.min_topup_amount }}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-emerald-400 focus:outline-none focus:border-pink-500">
-                </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">12-Digit UPI UTR Reference Number:</label>
+                <input type="text" id="manual-deposit-utr" inputmode="numeric" maxlength="30" required placeholder="e.g. 428190348123" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-pink-500">
+                <p class="text-[10px] text-slate-500 mt-0.5">Found in your payment receipt inside GPay, PhonePe, or Paytm.</p>
+              </div>
 
-                <div>
-                  <label class="block text-xs font-semibold text-slate-300 mb-1">12-Digit UPI UTR Reference Number:</label>
-                  <input type="text" id="manual-deposit-utr" required placeholder="e.g. 428190348123" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-pink-500">
-                  <p class="text-[10px] text-slate-500 mt-0.5">Found in your payment receipt inside GPay, PhonePe, or Paytm.</p>
-                </div>
+              <button type="submit" id="btn-manual-deposit" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs py-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer">
+                <i class="fa-solid fa-receipt"></i>
+                Submit UTR for Verification
+              </button>
+            </form>
+          </div>
+        </div>
 
-                <button type="submit" id="btn-manual-deposit" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer">
-                  <i class="fa-solid fa-receipt"></i>
-                  Submit UTR for Verification
-                </button>
-              </form>
+        <div class="text-center pt-1">
+          <button type="button" onclick="switchTopupMethod('auto')" class="text-xs text-slate-400 hover:text-white transition cursor-pointer">
+            &larr; Back to Instant Automated UPI
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Transaction History Table / Mobile Cards -->
+    <div class="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+      <div class="px-5 sm:px-6 py-4 border-b border-slate-800 bg-slate-900 flex items-center justify-between">
+        <h4 class="text-sm font-semibold text-white">Wallet Transactions History</h4>
+        <span class="text-xs text-slate-400 font-mono">{{ transactions|length }} records</span>
+      </div>
+
+      <!-- Mobile Transactions Card List (small screens) -->
+      <div class="sm:hidden divide-y divide-slate-800/60 font-sans">
+        {% if transactions %}
+          {% for tx in transactions %}
+          <div class="p-4 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <div>
+                {% if tx.type == 'DEPOSIT' %}
+                  <span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">UPI Deposit</span>
+                {% elif tx.type == 'BONUS' %}
+                  <span class="px-2 py-0.5 rounded text-[10px] bg-pink-500/10 text-pink-400 border border-pink-500/20 font-semibold">Bonus</span>
+                {% elif tx.type == 'REFUND' %}
+                  <span class="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">Refund</span>
+                {% elif tx.type == 'MANUAL_CREDIT' %}
+                  <span class="px-2 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 font-semibold">Admin Credit</span>
+                {% else %}
+                  <span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 border border-slate-700">Review Fee</span>
+                {% endif %}
+              </div>
+              <div class="font-mono font-bold text-sm {% if tx.type in ('DEPOSIT', 'BONUS', 'REFUND', 'MANUAL_CREDIT') %}text-emerald-400{% else %}text-slate-300{% endif %}">
+                {% if tx.type in ('DEPOSIT', 'BONUS', 'REFUND', 'MANUAL_CREDIT') %}+{% else %}-{% endif %}₹{{ "%.2f"|format(tx.amount) }}
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-xs text-slate-300">
+              <span class="truncate max-w-[190px]">{{ tx.notes or '-' }} {% if tx.utr_ref %}<span class="text-[10px] font-mono text-slate-500 block truncate">UTR: {{ tx.utr_ref }}</span>{% endif %}</span>
+              <div>
+                {% if tx.status == 'COMPLETED' %}
+                  <span class="text-emerald-400 text-xs font-medium"><i class="fa-solid fa-check mr-1"></i>Completed</span>
+                {% elif tx.status == 'PENDING' %}
+                  <span class="text-amber-400 text-xs font-medium"><i class="fa-solid fa-clock mr-1"></i>Verifying</span>
+                {% else %}
+                  <span class="text-red-400 text-xs font-medium"><i class="fa-solid fa-xmark mr-1"></i>Rejected</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="text-[10px] text-slate-500 font-mono text-right">
+              {{ tx.created_at[:16].replace('T', ' ') }}
             </div>
           </div>
-
-          <div class="text-center pt-1">
-            <button type="button" onclick="switchTopupMethod('auto')" class="text-xs text-slate-400 hover:text-white transition cursor-pointer">
-              &larr; Back to Instant Automated UPI
-            </button>
-          </div>
-        </div>
+          {% endfor %}
+        {% else %}
+          <div class="p-6 text-center text-slate-500 text-xs">No transactions recorded yet.</div>
+        {% endif %}
       </div>
 
-      <!-- Transaction History Table -->
-      <div class="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
-        <div class="px-6 py-4 border-b border-slate-800 bg-slate-900">
-          <h4 class="text-sm font-semibold text-white">Wallet Transactions History</h4>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-xs border-collapse font-sans">
-            <thead>
-              <tr class="border-b border-slate-800 text-slate-400 bg-slate-950/40">
-                <th class="p-3.5">Type</th>
-                <th class="p-3.5">Amount</th>
-                <th class="p-3.5">Reference / Notes</th>
-                <th class="p-3.5">Status</th>
-                <th class="p-3.5 text-right">Date & Time</th>
+      <!-- Desktop Transactions Table (large screens) -->
+      <div class="hidden sm:block overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse font-sans">
+          <thead>
+            <tr class="border-b border-slate-800 text-slate-400 bg-slate-950/40">
+              <th class="p-3.5">Type</th>
+              <th class="p-3.5">Amount</th>
+              <th class="p-3.5">Reference / Notes</th>
+              <th class="p-3.5">Status</th>
+              <th class="p-3.5 text-right">Date & Time</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800/60 font-sans">
+            {% if transactions %}
+              {% for tx in transactions %}
+              <tr class="hover:bg-slate-900/40 transition">
+                <td class="p-3.5">
+                  {% if tx.type == 'DEPOSIT' %}
+                    <span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">UPI Deposit</span>
+                  {% elif tx.type == 'BONUS' %}
+                    <span class="px-2 py-0.5 rounded text-[10px] bg-pink-500/10 text-pink-400 border border-pink-500/20 font-semibold">Bonus</span>
+                  {% elif tx.type == 'REFUND' %}
+                    <span class="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">Refund</span>
+                  {% elif tx.type == 'MANUAL_CREDIT' %}
+                    <span class="px-2 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 font-semibold">Admin Credit</span>
+                  {% else %}
+                    <span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 border border-slate-700">Review Fee</span>
+                  {% endif %}
+                </td>
+                <td class="p-3.5 font-mono font-bold {% if tx.type in ('DEPOSIT', 'BONUS', 'REFUND', 'MANUAL_CREDIT') %}text-emerald-400{% else %}text-slate-300{% endif %}">
+                  {% if tx.type in ('DEPOSIT', 'BONUS', 'REFUND', 'MANUAL_CREDIT') %}+{% else %}-{% endif %}₹{{ "%.2f"|format(tx.amount) }}
+                </td>
+                <td class="p-3.5 text-slate-300">
+                  {{ tx.notes or '-' }}
+                  {% if tx.utr_ref %}<span class="block text-[10px] text-slate-500 font-mono">UTR: {{ tx.utr_ref }}</span>{% endif %}
+                </td>
+                <td class="p-3.5">
+                  {% if tx.status == 'COMPLETED' %}
+                    <span class="text-emerald-400 font-medium"><i class="fa-solid fa-check mr-1"></i>Completed</span>
+                  {% elif tx.status == 'PENDING' %}
+                    <span class="text-amber-400 font-medium"><i class="fa-solid fa-clock mr-1"></i>Verifying</span>
+                  {% else %}
+                    <span class="text-red-400 font-medium"><i class="fa-solid fa-xmark mr-1"></i>Rejected</span>
+                  {% endif %}
+                </td>
+                <td class="p-3.5 text-right text-slate-400 font-mono text-[11px]">{{ tx.created_at[:16].replace('T', ' ') }}</td>
               </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-800/60 font-sans">
-              {% if transactions %}
-                {% for tx in transactions %}
-                <tr class="hover:bg-slate-900/40 transition">
-                  <td class="p-3.5">
-                    {% if tx.type == 'DEPOSIT' %}
-                      <span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">UPI Deposit</span>
-                    {% elif tx.type == 'BONUS' %}
-                      <span class="px-2 py-0.5 rounded text-[10px] bg-pink-500/10 text-pink-400 border border-pink-500/20 font-semibold">Bonus</span>
-                    {% elif tx.type == 'REFUND' %}
-                      <span class="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">Refund</span>
-                    {% elif tx.type == 'MANUAL_CREDIT' %}
-                      <span class="px-2 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 font-semibold">Admin Credit</span>
-                    {% else %}
-                      <span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 border border-slate-700">Review Fee</span>
-                    {% endif %}
-                  </td>
-                  <td class="p-3.5 font-mono font-bold {% if tx.type in ('DEPOSIT', 'BONUS', 'REFUND', 'MANUAL_CREDIT') %}text-emerald-400{% else %}text-slate-300{% endif %}">
-                    {% if tx.type in ('DEPOSIT', 'BONUS', 'REFUND', 'MANUAL_CREDIT') %}+{% else %}-{% endif %}₹{{ "%.2f"|format(tx.amount) }}
-                  </td>
-                  <td class="p-3.5 text-slate-300">
-                    {{ tx.notes or '-' }}
-                    {% if tx.utr_ref %}<span class="block text-[10px] text-slate-500 font-mono">UTR: {{ tx.utr_ref }}</span>{% endif %}
-                  </td>
-                  <td class="p-3.5">
-                    {% if tx.status == 'COMPLETED' %}
-                      <span class="text-emerald-400 font-medium"><i class="fa-solid fa-check mr-1"></i>Completed</span>
-                    {% elif tx.status == 'PENDING' %}
-                      <span class="text-amber-400 font-medium"><i class="fa-solid fa-clock mr-1"></i>Verifying</span>
-                    {% else %}
-                      <span class="text-red-400 font-medium"><i class="fa-solid fa-xmark mr-1"></i>Rejected</span>
-                    {% endif %}
-                  </td>
-                  <td class="p-3.5 text-right text-slate-400 font-mono text-[11px]">{{ tx.created_at[:16].replace('T', ' ') }}</td>
-                </tr>
-                {% endfor %}
-              {% else %}
-                <tr>
-                  <td colspan="5" class="p-6 text-center text-slate-500">No transactions recorded yet.</td>
-                </tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="5" class="p-6 text-center text-slate-500">No transactions recorded yet.</td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
       </div>
+    </div>
 
-    </main>
+  </main>
 
     <script>
       const MIN_TOPUP = parseFloat("{{ settings.min_topup_amount }}") || 50;
@@ -887,33 +1032,38 @@ ADMIN_HTML = """
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Inter', sans-serif; }
+    html, body {
+      font-family: 'Inter', sans-serif;
+      overflow-x: hidden;
+      max-width: 100vw;
+      touch-action: manipulation;
+    }
     .font-mono { font-family: 'JetBrains Mono', monospace; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
   """ + BASE_NAV + """
 
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-8">
+  <main class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6 sm:py-8 flex-1 w-full space-y-6 sm:space-y-8">
 
-    <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
       <div>
-        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+        <h2 class="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
           <i class="fa-solid fa-shield-halved text-amber-400"></i>
           Administrator Control Panel
         </h2>
         <p class="text-xs text-slate-400">Manage Pricing, FamGateway Keys, Indian Proxies, Payment Verifications & Manual Wallet Top-ups.</p>
       </div>
-      <a href="/" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-xl border border-slate-700 transition">
-        <i class="fa-solid fa-arrow-left mr-1"></i> Back to Dashboard
+      <a href="/" class="w-full sm:w-auto text-center justify-center text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-xl border border-slate-700 transition flex items-center gap-1.5">
+        <i class="fa-solid fa-arrow-left"></i> Back to Dashboard
       </a>
     </div>
 
     <!-- Admin Top Grid: Pending UPI Approvals & System Settings -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
 
       <!-- Left: Pending UPI Deposits (7 cols) -->
-      <div class="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+      <div class="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
         <div class="flex items-center justify-between border-b border-slate-800 pb-3">
           <h3 class="text-sm font-bold text-white flex items-center gap-2">
             <i class="fa-solid fa-money-bill-transfer text-emerald-400"></i>
@@ -924,7 +1074,35 @@ ADMIN_HTML = """
           </span>
         </div>
 
-        <div class="overflow-x-auto">
+        <!-- Mobile Cards for Pending Deposits (small screens) -->
+        <div class="sm:hidden divide-y divide-slate-800/60 font-sans">
+          {% if pending_deposits %}
+            {% for d in pending_deposits %}
+            <div class="p-3.5 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="font-semibold text-white text-xs">{{ d.username }}</span>
+                <span class="font-mono font-bold text-sm text-emerald-400">₹{{ "%.2f"|format(d.amount) }}</span>
+              </div>
+              <div class="text-[11px] font-mono text-slate-300 bg-slate-950/70 p-2 rounded-lg border border-slate-800 break-all">
+                UTR: <strong class="text-pink-400">{{ d.utr_ref }}</strong>
+              </div>
+              <div class="grid grid-cols-2 gap-2 pt-1">
+                <button onclick="approveDeposit({{ d.id }})" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs py-2 rounded-xl transition font-medium flex items-center justify-center gap-1">
+                  <i class="fa-solid fa-check"></i> Approve
+                </button>
+                <button onclick="rejectDeposit({{ d.id }})" class="bg-red-900/40 hover:bg-red-800 text-red-300 text-xs py-2 rounded-xl transition font-medium border border-red-700/50 flex items-center justify-center gap-1">
+                  <i class="fa-solid fa-xmark"></i> Reject
+                </button>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="p-6 text-center text-slate-500 text-xs">No pending UPI payments to review.</div>
+          {% endif %}
+        </div>
+
+        <!-- Desktop Table (large screens) -->
+        <div class="hidden sm:block overflow-x-auto">
           <table class="w-full text-left text-xs border-collapse">
             <thead>
               <tr class="border-b border-slate-800 text-slate-400 bg-slate-950/40">
@@ -942,10 +1120,10 @@ ADMIN_HTML = """
                   <td class="p-3 font-mono font-bold text-emerald-400">₹{{ "%.2f"|format(d.amount) }}</td>
                   <td class="p-3 font-mono text-slate-300">{{ d.utr_ref }}</td>
                   <td class="p-3 text-right space-x-1.5">
-                    <button onclick="approveDeposit({{ d.id }})" class="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] px-2.5 py-1 rounded-lg transition font-medium">
+                    <button onclick="approveDeposit({{ d.id }})" class="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] px-2.5 py-1 rounded-lg transition font-medium cursor-pointer">
                       Approve
                     </button>
-                    <button onclick="rejectDeposit({{ d.id }})" class="bg-red-900/40 hover:bg-red-800 text-red-300 text-[11px] px-2.5 py-1 rounded-lg transition font-medium border border-red-700/50">
+                    <button onclick="rejectDeposit({{ d.id }})" class="bg-red-900/40 hover:bg-red-800 text-red-300 text-[11px] px-2.5 py-1 rounded-lg transition font-medium border border-red-700/50 cursor-pointer">
                       Reject
                     </button>
                   </td>
@@ -1309,7 +1487,8 @@ def wallet_page():
             try:
                 ok, v_data = famgateway_client.verify_order(g_id, api_key)
                 if ok:
-                    credited = db.complete_gateway_deposit(g_id)
+                    v_amt = float(v_data.get("amount", 0)) if v_data.get("amount") else None
+                    credited = db.complete_gateway_deposit(g_id, verified_amount=v_amt)
                     if credited:
                         flash("Payment confirmed! Your wallet balance has been updated.", "success")
                         user = db.get_user_by_id(session["user_id"])  # Refresh balance
@@ -1347,10 +1526,16 @@ def admin_page():
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
     if request.method == "POST":
-        username = request.form.get("username", "")
+        ip = request.remote_addr or "127.0.0.1"
+        if is_rate_limited(f"login_fail_{ip}", max_calls=8, window_secs=300):
+            flash("Too many failed login attempts. Please wait 5 minutes before trying again.", "error")
+            return render_template_string(LOGIN_HTML)
+
+        username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         user = db.authenticate_user(username, password)
         if user:
+            session.clear()
             session["user_id"] = user["id"]
             session["username"] = user["username"]
             session["role"] = user["role"]
@@ -1400,6 +1585,9 @@ def api_sample():
 @app.route("/api/submit_jobs", methods=["POST"])
 @login_required
 def api_submit_jobs():
+    if is_rate_limited(f"submit_jobs_{session['user_id']}", max_calls=10, window_secs=60):
+        return jsonify({"success": False, "error": "Too many submission attempts. Please wait a moment."}), 429
+
     data = request.json or {}
     raw_text = data.get("raw_text", "")
     service_type = data.get("service_type", "auto_pilot")
@@ -1410,6 +1598,9 @@ def api_submit_jobs():
     accounts = parse_multi_jsons(raw_text)
     if not accounts:
         return jsonify({"success": False, "error": "No valid accounts with mandatory 'mobile' and 'xo' were parsed."})
+
+    if len(accounts) > 100:
+        return jsonify({"success": False, "error": "Batch limit exceeded. Maximum 100 accounts allowed per submission."})
 
     res = dispatch_batch_tasks(
         user_id=session["user_id"],
@@ -1425,6 +1616,9 @@ def api_submit_jobs():
 @app.route("/api/change_password", methods=["POST"])
 @login_required
 def api_change_password():
+    if is_rate_limited(f"change_pwd_{session['user_id']}", max_calls=5, window_secs=60):
+        return jsonify({"success": False, "error": "Too many password change attempts. Please wait."}), 429
+
     data = request.json or {}
     current_pwd = str(data.get("current_password", ""))
     new_pwd = str(data.get("new_password", ""))
@@ -1439,32 +1633,56 @@ def api_change_password():
 @app.route("/api/deposit", methods=["POST"])
 @login_required
 def api_deposit():
-    """Manual UTR submission for wallet top-up."""
+    """Manual UTR submission for wallet top-up with anti-cheat protection."""
+    if is_rate_limited(f"deposit_{session['user_id']}", max_calls=6, window_secs=60):
+        return jsonify({"success": False, "error": "Too many deposit requests. Please wait a minute."}), 429
+
     data = request.json or {}
-    amount = float(data.get("amount", 0))
-    utr = str(data.get("utr", "")).strip()
+    try:
+        amount = round(float(data.get("amount", 0)), 2)
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "error": "Invalid amount format."})
+
+    utr = re.sub(r"\s+", "", str(data.get("utr", "")).upper())
     min_topup = float(db.get_setting("min_topup_amount", "50.0"))
 
     if amount < min_topup:
         return jsonify({"success": False, "error": f"Minimum top-up amount is ₹{min_topup:.2f}."})
+    if amount > 50000:
+        return jsonify({"success": False, "error": "Maximum single top-up amount is ₹50,000."})
 
-    if not utr or len(utr) < 6:
-        return jsonify({"success": False, "error": "Invalid UTR reference number."})
+    if not re.match(r"^[A-Z0-9]{8,35}$", utr):
+        return jsonify({"success": False, "error": "Invalid UTR format. Must be 8-35 alphanumeric characters."})
 
-    tx_id = db.create_deposit_request(session["user_id"], amount, utr)
-    return jsonify({"success": True, "tx_id": tx_id})
+    try:
+        tx_id = db.create_deposit_request(session["user_id"], amount, utr)
+        return jsonify({"success": True, "tx_id": tx_id})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)})
+    except Exception as exc:
+        logger.exception("Manual deposit error")
+        return jsonify({"success": False, "error": "Failed to record deposit. Please try again."})
 
 
 @app.route("/api/famgateway/initiate", methods=["POST"])
 @login_required
 def api_famgateway_initiate():
     """Initiates automated FamGateway UPI checkout session."""
+    if is_rate_limited(f"gateway_init_{session['user_id']}", max_calls=6, window_secs=60):
+        return jsonify({"success": False, "error": "Too many checkout requests. Please wait a moment."}), 429
+
     data = request.json or {}
-    amount = float(data.get("amount", 0))
+    try:
+        amount = round(float(data.get("amount", 0)), 2)
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "error": "Invalid amount format."})
+
     min_topup = float(db.get_setting("min_topup_amount", "50.0"))
 
     if amount < min_topup:
         return jsonify({"success": False, "error": f"Minimum top-up amount is ₹{min_topup:.2f}."})
+    if amount > 50000:
+        return jsonify({"success": False, "error": "Maximum single top-up amount is ₹50,000."})
 
     api_key = (db.get_setting("famgateway_api_key") or os.environ.get("FAMGATEWAY_API_KEY") or "").strip()
     if not api_key:
@@ -1506,26 +1724,57 @@ def api_famgateway_initiate():
 
 @app.route("/api/webhook/famgateway", methods=["POST"])
 def api_famgateway_webhook():
-    """Receives and verifies automated payment settlement notifications from FamGateway."""
+    """Receives and securely verifies automated payment settlement notifications from FamGateway."""
+    client_ip = request.remote_addr or "unknown"
+    if is_rate_limited(f"webhook_{client_ip}", max_calls=60, window_secs=60):
+        return jsonify({"status": "error", "message": "Rate limited"}), 429
+
     raw_body = request.get_data()
     sig_header = request.headers.get("X-FamGateway-Signature", "")
-    api_key = db.get_setting("famgateway_api_key")
+    api_key = (db.get_setting("famgateway_api_key") or os.environ.get("FAMGATEWAY_API_KEY") or "").strip()
 
-    # If signature header is provided, verify it
+    # If signature header is provided, verify HMAC
     if sig_header and api_key:
         if not famgateway_client.verify_webhook_signature(raw_body, sig_header, api_key):
+            logger.warning(f"Rejected FamGateway webhook with invalid signature from IP {client_ip}")
             return jsonify({"status": "error", "message": "Invalid signature"}), 403
 
     try:
         payload = request.json or {}
-        order_id = str(payload.get("order_id") or payload.get("orderId") or "")
+        order_id = str(payload.get("order_id") or payload.get("orderId") or "").strip()
         status = str(payload.get("status") or "").upper()
 
-        if order_id and status in ("SUCCESS", "PAID", "COMPLETED"):
-            db.complete_gateway_deposit(order_id)
-            return jsonify({"status": "success", "message": "Wallet credited successfully."})
-        return jsonify({"status": "ignored", "message": "Status not completed."})
+        if not order_id:
+            return jsonify({"status": "ignored", "message": "No order_id provided."}), 400
+
+        # CRITICAL ANTI-CHEAT: Independent server-to-server TLS verification with FamGateway
+        # Never trust an unverified POST payload directly to credit real money
+        verified_amount = None
+        if api_key:
+            v_ok, v_resp = famgateway_client.verify_order(order_id, api_key)
+            if not v_ok:
+                logger.warning(f"FamGateway order verification failed for order {order_id}: {v_resp}")
+                return jsonify({"status": "unverified", "message": "Order verification failed at payment gateway."}), 400
+
+            v_data = v_resp.get("data") if isinstance(v_resp.get("data"), dict) else v_resp
+            if "amount" in v_data:
+                try:
+                    verified_amount = float(v_data["amount"])
+                except Exception:
+                    pass
+            status = str(v_data.get("status") or v_resp.get("status") or "SUCCESS").upper()
+
+        if status in ("SUCCESS", "PAID", "COMPLETED"):
+            credited = db.complete_gateway_deposit(order_id, verified_amount=verified_amount)
+            if credited:
+                logger.info(f"Successfully credited gateway deposit for order {order_id} (amount: {verified_amount})")
+                return jsonify({"status": "success", "message": "Wallet credited successfully."})
+            else:
+                return jsonify({"status": "already_processed", "message": "Transaction already settled or not found."})
+
+        return jsonify({"status": "ignored", "message": f"Order status is {status}."})
     except Exception as exc:
+        logger.exception("FamGateway webhook handling exception")
         return jsonify({"status": "error", "message": str(exc)}), 500
 
 
