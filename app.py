@@ -513,6 +513,17 @@ WALLET_HTML = """
 
   <main class="max-w-4xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-8">
 
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="p-3.5 rounded-2xl text-xs flex items-center gap-2.5 {% if category == 'error' %}bg-red-500/10 text-red-400 border border-red-500/20{% else %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% endif %}">
+            <i class="fa-solid {% if category == 'error' %}fa-circle-exclamation text-red-400{% else %}fa-circle-check text-emerald-400{% endif %}"></i>
+            <span>{{ message }}</span>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
     <!-- Wallet Balance Overview -->
     <div class="bg-gradient-to-r from-slate-900 to-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-2xl">
       <div>
@@ -1166,6 +1177,27 @@ def dashboard_page():
 @login_required
 def wallet_page():
     user = db.get_user_by_id(session["user_id"])
+
+    # Auto-verify any pending FamGateway orders for this user upon loading wallet page
+    api_key = db.get_setting("famgateway_api_key")
+    if api_key:
+        target_order_id = request.args.get("order_id")
+        user_txs = db.get_user_transactions(user["id"])
+        pending_gw_orders = [t["gateway_order_id"] for t in user_txs if t["status"] == "PENDING" and t.get("gateway_order_id")]
+        if target_order_id and target_order_id not in pending_gw_orders:
+            pending_gw_orders.append(target_order_id)
+
+        for g_id in pending_gw_orders:
+            try:
+                ok, v_data = famgateway_client.verify_order(g_id, api_key)
+                if ok:
+                    credited = db.complete_gateway_deposit(g_id)
+                    if credited:
+                        flash("Payment confirmed! Your wallet balance has been updated.", "success")
+                        user = db.get_user_by_id(session["user_id"])  # Refresh balance
+            except Exception:
+                pass
+
     transactions = db.get_user_transactions(user["id"])
     settings = db.get_all_settings()
     return render_template_string(
