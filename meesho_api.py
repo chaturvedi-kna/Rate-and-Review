@@ -1,8 +1,12 @@
 import base64
 import json
+import logging
+import sys
 import uuid
 from typing import Dict, Any, Tuple, Optional, List
 import requests
+
+import proxy_manager
 
 try:
     from refresh_session import refresh_via_telegram
@@ -103,13 +107,13 @@ def validate_account(session_data: dict) -> Dict[str, Any]:
         if resp.status_code == 401:
             if proxy_code == "1014":
                 result["status"] = "EXPIRED_1014"
-                result["error"] = "JWT Token expired (Proxy Code 1014)"
+                result["error"] = "Session token has expired on Meesho servers (Proxy Code 1014). Please use 'Old Accounts (Auto-Refresh & Review)' or paste a fresh JSON."
             elif proxy_code == "1007":
                 result["status"] = "REVOKED_1007"
-                result["error"] = "Session revoked/replaced on server (Proxy Code 1007)"
+                result["error"] = "Session was revoked or logged out on Meesho servers (Proxy Code 1007). Please use 'Old Accounts (Auto-Refresh & Review)' or re-login."
             else:
                 result["status"] = "UNAUTHORIZED_401"
-                result["error"] = f"Unauthorized (Proxy Code {proxy_code})"
+                result["error"] = f"Unauthorized session token (Proxy Code {proxy_code or '401'}). Token may be expired or invalid."
             return result
 
         resp.raise_for_status()
@@ -208,7 +212,7 @@ def submit_review_full(
     def log(msg):
         if log_callback:
             log_callback(msg)
-        print(msg)
+        print(msg, flush=True)
 
     client, base_url = make_client(session_data)
     user_id = session_data.get("user_id")

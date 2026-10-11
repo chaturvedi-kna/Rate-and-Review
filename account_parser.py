@@ -1,7 +1,11 @@
 import json
 import re
 import base64
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+
+
+import time
+from datetime import datetime
 
 
 def extract_user_id_from_xo(xo_str: str) -> int:
@@ -23,6 +27,37 @@ def extract_user_id_from_xo(xo_str: str) -> int:
         return int(jwt_data.get("https://meesho.com/user_id", 0))
     except Exception:
         return 0
+
+
+def get_token_expiry(xo_str: str) -> Optional[int]:
+    """Extracts expiration timestamp (Unix epoch) from the inner JWT payload inside Meesho's composite XO token."""
+    try:
+        parts = xo_str.split(".")
+        if len(parts) < 2:
+            return None
+        payload_b64 = parts[1]
+        payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+        data = json.loads(base64.b64decode(payload_b64))
+
+        jwt_str = data.get("jwt", "")
+        jwt_parts = jwt_str.split(".")
+        if len(jwt_parts) < 2:
+            return None
+        jwt_payload_b64 = jwt_parts[1] + "=" * ((4 - len(jwt_parts[1]) % 4) % 4)
+        jwt_data = json.loads(base64.urlsafe_b64decode(jwt_payload_b64))
+        exp = jwt_data.get("exp")
+        return int(exp) if exp is not None else None
+    except Exception:
+        return None
+
+
+def is_token_expired(xo_str: str) -> Tuple[bool, Optional[int]]:
+    """Checks whether token is expired. Returns (is_expired, exp_timestamp)."""
+    exp = get_token_expiry(xo_str)
+    if exp is not None:
+        now = time.time()
+        return (now >= exp, exp)
+    return (False, None)
 
 
 def parse_multi_jsons(raw_text: str) -> List[Dict[str, Any]]:
@@ -185,7 +220,28 @@ def parse_multi_jsons(raw_text: str) -> List[Dict[str, Any]]:
                 "rating": int(item.get("rating", 5)),
                 "comments": str(item.get("comments", "Very good quality, fabric is soft and comfortable. Value for money!")),
             }
+
+            # Check and tag token expiration
+            is_exp, exp_ts = is_token_expired(xo)
+            norm_item["token_exp"] = exp_ts
+            norm_item["is_expired"] = is_exp
+
             normalized.append(norm_item)
 
     return normalized
+
+
+def parse_multi_jsons_with_report(raw_text: str) -> Dict[str, Any]:
+    """
+    Parses accounts and returns detailed diagnostics including counts and expired token detection.
+    """
+    accounts = parse_multi_jsons(raw_text)
+    expired_accounts = [a for a in accounts if a.get("is_expired")]
+    return {
+        "accounts": accounts,
+        "valid_count": len(accounts),
+        "expired_count": len(expired_accounts),
+        "expired_accounts": expired_accounts,
+    }
+
 

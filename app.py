@@ -411,10 +411,24 @@ DASHBOARD_HTML = """
               {% if t.order_id %}<span class="text-[10px] text-slate-500 font-mono">Order #{{ t.order_id }}</span>{% endif %}
             </div>
 
-            {% if t.comments %}
+            {% if t.comments and t.status != 'FAILED' %}
             <div class="bg-slate-950/60 border border-slate-800/80 rounded-lg p-2 text-xs">
               <span class="text-amber-400 font-bold mr-1">{{ t.rating_stars }}★</span>
               <span class="text-slate-300 text-[11px]">{{ t.comments }}</span>
+            </div>
+            {% endif %}
+
+            {% if t.status == 'FAILED' %}
+            <div class="mt-2 p-2.5 rounded-xl bg-red-950/50 border border-red-500/30 text-xs text-red-300 space-y-1">
+              <div class="flex items-center gap-1.5 font-semibold text-red-200">
+                <i class="fa-solid fa-triangle-exclamation text-red-400"></i>
+                <span>Why this task failed:</span>
+              </div>
+              <p class="text-[11px] text-red-300/90 leading-relaxed">{{ t.error_message or 'Review submission could not be completed.' }}</p>
+              <div class="pt-1 text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                <i class="fa-solid fa-circle-check"></i>
+                <span>₹{{ "%.2f"|format(t.cost) }} automatically refunded to your wallet</span>
+              </div>
             </div>
             {% endif %}
 
@@ -470,7 +484,17 @@ DASHBOARD_HTML = """
                     <span class="text-amber-400 font-semibold">{{ t.rating_stars }}★</span>
                     <span class="text-slate-300 text-[11px] block truncate max-w-xs" title="{{ t.comments }}">{{ t.comments }}</span>
                   {% elif t.status == 'FAILED' %}
-                    <span class="text-red-400 text-[11px]" title="{{ t.error_message }}">{{ t.error_message[:45] }}...</span>
+                    <div class="p-2.5 rounded-xl bg-red-950/40 border border-red-500/30 text-red-300 text-[11px] max-w-xs">
+                      <div class="font-semibold text-red-200 flex items-center gap-1 mb-0.5">
+                        <i class="fa-solid fa-triangle-exclamation text-red-400"></i>
+                        <span>Failure Reason:</span>
+                      </div>
+                      <p class="text-red-300/90 leading-relaxed">{{ t.error_message or 'Review submission could not be completed.' }}</p>
+                      <div class="text-[10px] text-emerald-400 mt-1 font-medium flex items-center gap-1">
+                        <i class="fa-solid fa-circle-check"></i>
+                        <span>₹{{ "%.2f"|format(t.cost) }} refunded to wallet</span>
+                      </div>
+                    </div>
                   {% else %}
                     <span class="text-slate-500">-</span>
                   {% endif %}
@@ -513,11 +537,84 @@ DASHBOARD_HTML = """
   </main>
 
   <script>
+    const priceAutoPilot = {{ prices.price_auto_pilot }};
+    const priceStandard = {{ prices.price_standard_review }};
+    const userBalance = {{ user.wallet_balance }};
+
+    function detectAccounts(text) {
+      if (!text) return [];
+      text = text.trim();
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) return parsed.filter(x => x && (x.mobile || x.phone) && (x.xo || x.token));
+        if (typeof parsed === 'object' && (parsed.mobile || parsed.phone) && (parsed.xo || parsed.token)) return [parsed];
+      } catch(e) {}
+
+      const found = [];
+      const regex = /\{[^{}]*"xo"[^{}]*\}/g;
+      let m;
+      while ((m = regex.exec(text)) !== null) {
+        try {
+          const obj = JSON.parse(m[0]);
+          if ((obj.mobile || obj.phone) && obj.xo) found.push(obj);
+        } catch(e) {}
+      }
+      if (found.length > 0) return found;
+
+      const xoMatches = text.match(/"xo"\s*:/gi);
+      if (xoMatches) return Array(xoMatches.length).fill({mobile: "Account", xo: "dummy"});
+      return [];
+    }
+
+    function checkTokenExpiry(xoStr) {
+      try {
+        const parts = xoStr.split('.');
+        if (parts.length < 2) return null;
+        let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        while (b64.length % 4) b64 += '=';
+        const outer = JSON.parse(atob(b64));
+        if (!outer.jwt) return null;
+        const jParts = outer.jwt.split('.');
+        if (jParts.length < 2) return null;
+        let jb64 = jParts[1].replace(/-/g, '+').replace(/_/g, '/');
+        while (jb64.length % 4) jb64 += '=';
+        const inner = JSON.parse(atob(jb64));
+        return inner.exp ? Number(inner.exp) : null;
+      } catch(e) {
+        return null;
+      }
+    }
+
+    function updateCostEstimate() {
+      const text = document.getElementById('json-input').value;
+      const accounts = detectAccounts(text);
+      const count = accounts.length;
+      const serviceRadio = document.querySelector('input[name="service_type"]:checked');
+      const serviceType = serviceRadio ? serviceRadio.value : 'auto_pilot';
+      const pricePerItem = serviceType === 'auto_pilot' ? priceAutoPilot : priceStandard;
+      const totalCost = count * pricePerItem;
+      const costEl = document.getElementById('cost-estimate');
+
+      if (count === 0) {
+        costEl.innerHTML = `Wallet Balance: <strong class="text-emerald-400">₹${userBalance.toFixed(2)}</strong>`;
+        return;
+      }
+
+      if (userBalance >= totalCost) {
+        const remaining = userBalance - totalCost;
+        costEl.innerHTML = `<span class="text-emerald-400 font-semibold">✓ ${count} Account${count > 1 ? 's' : ''} detected</span> | Cost: <strong class="text-white">₹${totalCost.toFixed(2)}</strong> (₹${pricePerItem}/order) | Balance: <strong class="text-emerald-400">₹${userBalance.toFixed(2)}</strong> <span class="text-slate-400">(Remains: ₹${remaining.toFixed(2)})</span>`;
+      } else {
+        const deficit = totalCost - userBalance;
+        costEl.innerHTML = `<span class="text-amber-400 font-semibold">⚠️ ${count} Account${count > 1 ? 's' : ''} detected</span> | Cost: <strong class="text-red-400">₹${totalCost.toFixed(2)}</strong> | Balance: <strong class="text-slate-300">₹${userBalance.toFixed(2)}</strong> <span class="text-red-400 font-bold block sm:inline mt-1 sm:mt-0 sm:ml-1.5">(Need ₹${deficit.toFixed(2)} more — <a href="/wallet" class="text-pink-400 underline font-bold hover:text-pink-300">Top Up Wallet</a>)</span>`;
+      }
+    }
+
     async function loadSample() {
       try {
         const res = await fetch('/api/sample');
         const data = await res.json();
         document.getElementById('json-input').value = JSON.stringify(data, null, 2);
+        updateCostEstimate();
       } catch (e) {
         alert("Failed to load sample: " + e.message);
       }
@@ -539,14 +636,47 @@ DASHBOARD_HTML = """
     async function handleJobSubmit(e) {
       e.preventDefault();
       const rawText = document.getElementById('json-input').value.trim();
+      const accounts = detectAccounts(rawText);
       const serviceType = document.querySelector('input[name="service_type"]:checked').value;
       const ratingMode = document.getElementById('rating-mode').value;
       const reviewMode = document.querySelector('input[name="review_mode"]:checked').value;
       const comments = document.getElementById('review-comments').value.trim();
 
+      if (accounts.length === 0) {
+        alert("No valid Meesho account JSONs detected. Please ensure your input includes 'mobile' and 'xo' tokens.");
+        return;
+      }
+
+      const pricePerItem = serviceType === 'auto_pilot' ? priceAutoPilot : priceStandard;
+      const totalCost = accounts.length * pricePerItem;
+
+      // 1. Client-side Wallet Balance Validation
+      if (userBalance < totalCost) {
+        const deficit = totalCost - userBalance;
+        if (confirm(`⚠️ Insufficient Wallet Balance!\n\nYou submitted ${accounts.length} account(s) which requires ₹${totalCost.toFixed(2)} (₹${pricePerItem}/order), but your current balance is ₹${userBalance.toFixed(2)}.\n\nYou need to add ₹${deficit.toFixed(2)} to proceed.\n\nWould you like to open the Wallet top-up page now?`)) {
+          window.location.href = '/wallet';
+        }
+        return;
+      }
+
+      // 2. Client-side Expired Token Detection for Fresh Accounts
+      if (serviceType === 'standard_review') {
+        const nowSec = Date.now() / 1000;
+        for (const acc of accounts) {
+          if (acc.xo) {
+            const exp = checkTokenExpiry(acc.xo);
+            if (exp && nowSec >= exp) {
+              const expDate = new Date(exp * 1000).toLocaleString();
+              alert(`⚠️ Expired JSON Session Token Detected (+91 ${acc.mobile || 'Account'})\n\nThis account's session token expired on ${expDate}.\n\nSince you selected "Fresh Accounts (Instant Review)", expired sessions cannot be processed directly.\n\nPlease select "Old Accounts (Auto-Refresh & Review)" to automatically refresh your session, or generate and paste fresh JSON tokens.`);
+              return;
+            }
+          }
+        }
+      }
+
       const btn = document.getElementById('btn-submit');
       btn.disabled = true;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing & Submitting...';
 
       try {
         const res = await fetch('/api/submit_jobs', {
@@ -562,19 +692,31 @@ DASHBOARD_HTML = """
         });
         const data = await res.json();
         if (data.success) {
-          alert(`Successfully scheduled ${data.task_count} review task(s)! Total deducted: ₹${data.total_cost.toFixed(2)}`);
+          alert(`✅ Successfully scheduled ${data.task_count} review task(s)!\nTotal deducted: ₹${data.total_cost.toFixed(2)}`);
           location.reload();
         } else {
-          alert(data.error || "Submission failed.");
+          alert("Submission Error:\n\n" + (data.error || "Submission failed. Please verify your inputs."));
           btn.disabled = false;
           btn.innerHTML = '<i class="fa-solid fa-play"></i> Submit & Start Reviewing';
         }
       } catch (err) {
-        alert("Error: " + err.message);
+        alert("Connection Error:\n\n" + err.message);
         btn.disabled = false;
         btn.innerHTML = '<i class="fa-solid fa-play"></i> Submit & Start Reviewing';
       }
     }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const inputEl = document.getElementById('json-input');
+      if (inputEl) {
+        inputEl.addEventListener('input', updateCostEstimate);
+        inputEl.addEventListener('paste', () => setTimeout(updateCostEstimate, 50));
+      }
+      document.querySelectorAll('input[name="service_type"]').forEach(r => {
+        r.addEventListener('change', updateCostEstimate);
+      });
+      updateCostEstimate();
+    });
   </script>
 </body>
 </html>
@@ -1610,7 +1752,8 @@ def api_submit_jobs():
         review_mode=review_mode,
         custom_comments=comments,
     )
-    return jsonify(res)
+    status_code = 200 if res.get("success") else 400
+    return jsonify(res), status_code
 
 
 @app.route("/api/change_password", methods=["POST"])
