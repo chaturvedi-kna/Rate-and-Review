@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+.env
+data/
+*.log
+scratch/
+review_output/
+downloaded_refresh*
+

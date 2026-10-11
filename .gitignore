@@ -1,0 +1,55 @@
+# ==========================================
+# Git Ignore for Meesho Automation Studio
+# Prevents accidental leaks to public GitHub
+# ==========================================
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+secrets/
+
+# Telegram Telethon Sessions
+*.session
+*.session.txt
+*.session-journal
+userbot.session.txt
+userbot.*.session.txt
+
+# Databases & local storage
+*.db
+*.sqlite
+*.sqlite3
+meesho_studio.db
+data/
+
+# Personal account JSONs and credentials
+*.json
+!requirements.json
+!render.yaml
+meesho_account_*.json
+7977748514.json
+8869049741.json
+downloaded_refresh*
+
+# Python cache & compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+
+# Logs & output
+*.log
+review_output/
+scratch/
+.idea/
+.vscode/
+
+# Verification & scratch tests
+verify_*.py
+test_*.py
+
+review meesho.xml
