@@ -536,74 +536,126 @@ WALLET_HTML = """
       </a>
     </div>
 
-    <!-- UPI Top-up Section (FamGateway + Manual UTR Fallback) -->
+    <!-- UPI Top-up Section (Automated Primary + Manual Fallback) -->
     <div id="payment-section" class="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
-      <div class="border-b border-slate-800 pb-4">
-        <h3 class="text-lg font-bold text-white flex items-center gap-2">
-          <i class="fa-solid fa-qrcode text-pink-500"></i>
-          Instant UPI Wallet Top-up
-        </h3>
-        <p class="text-xs text-slate-400">
-          Minimum top-up: <strong class="text-emerald-400 font-mono">₹{{ settings.min_topup_amount }}</strong>. Payments are routed securely via UPI.
-        </p>
+      <div class="border-b border-slate-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h3 class="text-lg font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-wallet text-pink-500"></i>
+            Add Funds to Wallet
+          </h3>
+          <p class="text-xs text-slate-400">
+            Minimum top-up: <strong class="text-emerald-400 font-mono">₹{{ settings.min_topup_amount }}</strong>. Fast & secure UPI payment.
+          </p>
+        </div>
+        <!-- Method Selector Pills -->
+        <div class="inline-flex p-1 bg-slate-950 border border-slate-800 rounded-xl text-xs shrink-0">
+          <button type="button" id="tab-auto" onclick="switchTopupMethod('auto')" class="px-3.5 py-1.5 rounded-lg font-semibold transition bg-pink-600 text-white shadow">
+            ⚡ Instant Auto UPI
+          </button>
+          <button type="button" id="tab-manual" onclick="switchTopupMethod('manual')" class="px-3.5 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white">
+            📝 Manual Transfer
+          </button>
+        </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-        <!-- QR Code Display -->
-        <div class="md:col-span-5 flex flex-col items-center justify-center p-6 bg-slate-950 border border-slate-800 rounded-2xl">
-          <img id="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa={{ settings.upi_id }}%26pn={{ settings.upi_name }}%26cu=INR" alt="UPI QR" class="w-48 h-48 rounded-xl bg-white p-2">
-          <p class="text-[11px] text-slate-400 mt-3 font-medium">Scan with any UPI App (GPay, PhonePe, Paytm)</p>
+      <!-- Option 1: Instant Automated Checkout (Default & Recommended) -->
+      <div id="section-auto-topup" class="space-y-5">
+        <div class="bg-pink-500/10 border border-pink-500/20 rounded-2xl p-4 flex items-start gap-3">
+          <div class="h-9 w-9 rounded-xl bg-pink-500/20 text-pink-400 flex items-center justify-center shrink-0 mt-0.5">
+            <i class="fa-solid fa-bolt text-sm"></i>
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-pink-300">Instant Automated UPI Payment</h4>
+            <p class="text-[11px] text-slate-300 mt-0.5">Pay using any UPI app (GPay, PhonePe, Paytm, CRED). Your wallet balance is credited automatically the instant payment completes.</p>
+          </div>
         </div>
 
-        <!-- Top-up Form -->
-        <div class="md:col-span-7 space-y-4">
-          <div class="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
-            <span class="text-[11px] text-slate-400 block font-medium">Receiver UPI ID:</span>
-            <div class="flex items-center justify-between">
-              <span id="upi-id-text" class="text-sm font-mono text-pink-400 font-bold">{{ settings.upi_id }}</span>
-              <button onclick="copyUPI()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg border border-slate-700 transition">
-                <i class="fa-regular fa-copy mr-1"></i> Copy
-              </button>
-            </div>
-            <span class="text-[10px] text-slate-500 block">Name: {{ settings.upi_name }}</span>
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1.5">Enter Amount to Add (₹):</label>
+          <div class="relative max-w-md">
+            <span class="absolute left-3.5 top-2.5 text-xs text-slate-400 font-mono font-bold">₹</span>
+            <input type="number" id="auto-deposit-amount" min="{{ settings.min_topup_amount }}" step="1" required value="{{ settings.min_topup_amount }}" class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3.5 py-2.5 text-sm font-mono text-emerald-400 focus:outline-none focus:border-pink-500">
+          </div>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button type="button" onclick="setAutoAmount(50)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-800 transition">₹50</button>
+            <button type="button" onclick="setAutoAmount(100)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-800 transition">₹100</button>
+            <button type="button" onclick="setAutoAmount(250)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-800 transition">₹250</button>
+            <button type="button" onclick="setAutoAmount(500)" class="text-xs bg-slate-950 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-800 transition">₹500</button>
+          </div>
+        </div>
+
+        <button type="button" onclick="payWithFamGateway()" id="btn-famgateway" class="w-full max-w-md bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white font-semibold text-xs py-3.5 rounded-xl shadow-lg shadow-pink-600/25 transition flex items-center justify-center gap-2">
+          <i class="fa-solid fa-bolt"></i>
+          Proceed to Instant UPI Checkout
+        </button>
+
+        <div class="pt-3 border-t border-slate-800/80">
+          <p class="text-[11px] text-slate-400 flex items-center gap-2">
+            <i class="fa-solid fa-circle-info text-amber-400"></i>
+            <span>If automated checkout is down or having gateway issues,
+              <button type="button" onclick="switchTopupMethod('manual')" class="text-pink-400 hover:text-pink-300 underline font-semibold ml-1">click here for Manual UPI Transfer</button>.
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Option 2: Manual UPI Transfer (Hidden until clicked) -->
+      <div id="section-manual-topup" class="hidden space-y-6 pt-1">
+        <div class="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 flex items-start gap-3">
+          <div class="h-9 w-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+            <i class="fa-solid fa-hand-holding-dollar text-sm"></i>
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-amber-300">Manual UPI Transfer (Fallback)</h4>
+            <p class="text-[11px] text-slate-300 mt-0.5">Transfer directly to the UPI ID or scan the QR below, then enter your 12-digit UTR reference number for confirmation.</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
+          <!-- QR Code Display -->
+          <div class="md:col-span-5 flex flex-col items-center justify-center p-6 bg-slate-950 border border-slate-800 rounded-2xl">
+            <img id="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa={{ settings.upi_id }}%26pn={{ settings.upi_name }}%26cu=INR" alt="UPI QR" class="w-48 h-48 rounded-xl bg-white p-2">
+            <p class="text-[11px] text-slate-400 mt-3 font-medium text-center">Scan with any UPI App (GPay, PhonePe, Paytm)</p>
           </div>
 
-          <form onsubmit="handleTopupSubmit(event)" class="space-y-3.5">
-            <div>
-              <label class="block text-xs font-semibold text-slate-300 mb-1">Amount to Add (₹):</label>
-              <input type="number" id="deposit-amount" min="{{ settings.min_topup_amount }}" step="1" required value="{{ settings.min_topup_amount }}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-emerald-400 focus:outline-none focus:border-pink-500">
-              <div class="flex gap-2 mt-2">
-                <button type="button" onclick="setAmount(50)" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">₹50</button>
-                <button type="button" onclick="setAmount(100)" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">₹100</button>
-                <button type="button" onclick="setAmount(250)" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">₹250</button>
-                <button type="button" onclick="setAmount(500)" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">₹500</button>
+          <!-- Manual Form -->
+          <div class="md:col-span-7 space-y-4">
+            <div class="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
+              <span class="text-[11px] text-slate-400 block font-medium">Receiver UPI ID:</span>
+              <div class="flex items-center justify-between">
+                <span id="upi-id-text" class="text-sm font-mono text-pink-400 font-bold">{{ settings.upi_id }}</span>
+                <button onclick="copyUPI()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg border border-slate-700 transition">
+                  <i class="fa-regular fa-copy mr-1"></i> Copy
+                </button>
               </div>
+              <span class="text-[10px] text-slate-500 block">Name: {{ settings.upi_name }}</span>
             </div>
 
-            {% if settings.famgateway_api_key %}
-            <!-- FamGateway Automated Payment Button -->
-            <button type="button" onclick="payWithFamGateway()" id="btn-famgateway" class="w-full bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white font-medium text-xs py-3 rounded-xl shadow-lg shadow-pink-600/20 transition flex items-center justify-center gap-2">
-              <i class="fa-solid fa-bolt"></i>
-              Instant Automated UPI Checkout (FamGateway)
-            </button>
-            <div class="relative flex py-1 items-center">
-              <div class="flex-grow border-t border-slate-800"></div>
-              <span class="flex-shrink mx-2 text-[10px] text-slate-500 uppercase">or manual UTR</span>
-              <div class="flex-grow border-t border-slate-800"></div>
-            </div>
-            {% endif %}
+            <form onsubmit="handleManualTopupSubmit(event)" class="space-y-3.5">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">Transferred Amount (₹):</label>
+                <input type="number" id="manual-deposit-amount" min="{{ settings.min_topup_amount }}" step="1" required value="{{ settings.min_topup_amount }}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-emerald-400 focus:outline-none focus:border-pink-500">
+              </div>
 
-            <div>
-              <label class="block text-xs font-semibold text-slate-300 mb-1">12-Digit UPI UTR Reference Number:</label>
-              <input type="text" id="deposit-utr" placeholder="e.g. 428190348123" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-pink-500">
-              <p class="text-[10px] text-slate-500 mt-0.5">Found in payment receipt on GPay, PhonePe, or Paytm.</p>
-            </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">12-Digit UPI UTR Reference Number:</label>
+                <input type="text" id="manual-deposit-utr" required placeholder="e.g. 428190348123" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-pink-500">
+                <p class="text-[10px] text-slate-500 mt-0.5">Found in your payment receipt inside GPay, PhonePe, or Paytm.</p>
+              </div>
 
-            <button type="submit" id="btn-deposit" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-2">
-              <i class="fa-solid fa-receipt"></i>
-              Submit UTR for Verification
-            </button>
-          </form>
+              <button type="submit" id="btn-manual-deposit" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-2">
+                <i class="fa-solid fa-receipt"></i>
+                Submit UTR for Verification
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div class="text-center pt-1">
+          <button type="button" onclick="switchTopupMethod('auto')" class="text-xs text-slate-400 hover:text-white transition">
+            &larr; Back to Instant Automated UPI
+          </button>
         </div>
       </div>
     </div>
@@ -675,8 +727,27 @@ WALLET_HTML = """
   <script>
     const MIN_TOPUP = parseFloat("{{ settings.min_topup_amount }}");
 
-    function setAmount(val) {
-      document.getElementById('deposit-amount').value = val;
+    function switchTopupMethod(method) {
+      const autoSec = document.getElementById('section-auto-topup');
+      const manualSec = document.getElementById('section-manual-topup');
+      const tabAuto = document.getElementById('tab-auto');
+      const tabManual = document.getElementById('tab-manual');
+
+      if (method === 'manual') {
+        autoSec.classList.add('hidden');
+        manualSec.classList.remove('hidden');
+        tabAuto.className = 'px-3.5 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white';
+        tabManual.className = 'px-3.5 py-1.5 rounded-lg font-semibold transition bg-amber-600 text-white shadow';
+      } else {
+        manualSec.classList.add('hidden');
+        autoSec.classList.remove('hidden');
+        tabAuto.className = 'px-3.5 py-1.5 rounded-lg font-semibold transition bg-pink-600 text-white shadow';
+        tabManual.className = 'px-3.5 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white';
+      }
+    }
+
+    function setAutoAmount(val) {
+      document.getElementById('auto-deposit-amount').value = val;
     }
 
     function copyUPI() {
@@ -686,14 +757,14 @@ WALLET_HTML = """
     }
 
     async function payWithFamGateway() {
-      const amount = parseFloat(document.getElementById('deposit-amount').value);
+      const amount = parseFloat(document.getElementById('auto-deposit-amount').value);
       if (amount < MIN_TOPUP) {
         alert(`Minimum top-up amount is ₹${MIN_TOPUP}`);
         return;
       }
       const btn = document.getElementById('btn-famgateway');
       btn.disabled = true;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating Checkout...';
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Initializing Checkout...';
 
       try {
         const res = await fetch('/api/famgateway/initiate', {
@@ -705,21 +776,21 @@ WALLET_HTML = """
         if (d.success && d.checkout_url) {
           window.location.href = d.checkout_url;
         } else {
-          alert(d.error || "Failed to initialize payment gateway.");
+          alert(d.error || "Failed to initialize payment gateway. Please use Manual UPI Transfer.");
           btn.disabled = false;
-          btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Instant Automated UPI Checkout (FamGateway)';
+          btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Proceed to Instant UPI Checkout';
         }
       } catch (err) {
-        alert("Error: " + err.message);
+        alert("Error: " + err.message + "\nPlease use Manual UPI Transfer if gateway is unavailable.");
         btn.disabled = false;
-        btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Instant Automated UPI Checkout (FamGateway)';
+        btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Proceed to Instant UPI Checkout';
       }
     }
 
-    async function handleTopupSubmit(e) {
+    async function handleManualTopupSubmit(e) {
       e.preventDefault();
-      const amount = parseFloat(document.getElementById('deposit-amount').value);
-      const utr = document.getElementById('deposit-utr').value.trim();
+      const amount = parseFloat(document.getElementById('manual-deposit-amount').value);
+      const utr = document.getElementById('manual-deposit-utr').value.trim();
 
       if (amount < MIN_TOPUP) {
         alert(`Minimum top-up amount is ₹${MIN_TOPUP}`);
@@ -730,9 +801,9 @@ WALLET_HTML = """
         return;
       }
 
-      const btn = document.getElementById('btn-deposit');
+      const btn = document.getElementById('btn-manual-deposit');
       btn.disabled = true;
-      btn.innerText = "Submitting...";
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
 
       try {
         const res = await fetch('/api/deposit', {
@@ -747,10 +818,12 @@ WALLET_HTML = """
         } else {
           alert(data.error || "Deposit submission failed.");
           btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-receipt"></i> Submit UTR for Verification';
         }
       } catch (err) {
         alert("Error: " + err.message);
         btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-receipt"></i> Submit UTR for Verification';
       }
     }
   </script>
@@ -1348,9 +1421,9 @@ def api_famgateway_initiate():
     if amount < min_topup:
         return jsonify({"success": False, "error": f"Minimum top-up amount is ₹{min_topup:.2f}."})
 
-    api_key = db.get_setting("famgateway_api_key")
+    api_key = (db.get_setting("famgateway_api_key") or os.environ.get("FAMGATEWAY_API_KEY") or "").strip()
     if not api_key:
-        return jsonify({"success": False, "error": "FamGateway API key is not configured by admin."})
+        return jsonify({"success": False, "error": "FamGateway API key is not configured. Please use Manual UPI Transfer."})
 
     user = db.get_user_by_id(session["user_id"])
     redirect_url = request.host_url.rstrip("/") + url_for("wallet_page")
@@ -1365,13 +1438,25 @@ def api_famgateway_initiate():
     )
 
     if ok:
-        order_id = resp.get("order_id") or resp.get("orderId") or ""
-        checkout_url = resp.get("checkout_url") or resp.get("payment_url") or resp.get("url") or ""
+        data_obj = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+        order_id = str(resp.get("order_id") or data_obj.get("order_id") or "")
+        checkout_url = str(resp.get("checkout_url") or data_obj.get("checkout_url") or resp.get("payment_url") or "")
+
+        if not checkout_url:
+            return jsonify({"success": False, "error": "Gateway did not return checkout URL. Please use Manual UPI Transfer."})
+
         # Create pending transaction
         db.create_deposit_request(session["user_id"], amount, utr_ref="FamGateway", gateway_order_id=order_id)
-        return jsonify({"success": True, "checkout_url": checkout_url, "order_id": order_id})
+        return jsonify({
+            "success": True,
+            "checkout_url": checkout_url,
+            "order_id": order_id,
+            "qr_url": str(resp.get("qr_url") or data_obj.get("qr_url") or ""),
+            "upi_intent": str(resp.get("upi_intent") or data_obj.get("upi_intent") or "")
+        })
     else:
-        return jsonify({"success": False, "error": resp.get("error") or resp.get("message") or "Failed to create gateway order."})
+        err_msg = resp.get("error") or resp.get("message") or "Failed to create gateway order. Please use Manual UPI Transfer."
+        return jsonify({"success": False, "error": err_msg})
 
 
 @app.route("/api/webhook/famgateway", methods=["POST"])

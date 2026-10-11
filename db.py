@@ -278,15 +278,34 @@ def init_db():
                     (k, v),
                 )
 
+        # Sync FamGateway API key from environment if provided
+        env_fg_key = (os.environ.get("FAMGATEWAY_API_KEY") or "").strip()
+        if env_fg_key:
+            if db.is_pg:
+                db.execute(
+                    "INSERT INTO settings (key, value) VALUES ('famgateway_api_key', ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                    (env_fg_key,),
+                )
+            else:
+                db.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('famgateway_api_key', ?)",
+                    (env_fg_key,),
+                )
+
         # Default admin account
         db.execute("SELECT id FROM users WHERE username = 'admin'")
-        if not db.fetchone():
-            initial_admin_pwd = os.environ.get("ADMIN_PASSWORD", "admin123")
-            admin_pwd = hash_password(initial_admin_pwd)
+        admin_row = db.fetchone()
+        env_admin_pwd = (os.environ.get("ADMIN_PASSWORD") or "").strip()
+        initial_admin_pwd = env_admin_pwd or "admin123"
+        admin_pwd = hash_password(initial_admin_pwd)
+        if not admin_row:
             db.execute(
                 "INSERT INTO users (username, email, password_hash, role, wallet_balance, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 ("admin", "admin@studio.local", admin_pwd, "admin", 1000.0, datetime.now().isoformat()),
             )
+        elif env_admin_pwd:
+            # Sync existing admin password with ADMIN_PASSWORD env var if explicitly set
+            db.execute("UPDATE users SET password_hash = ? WHERE username = 'admin'", (admin_pwd,))
 
 
 # ------------------------------------------------------------

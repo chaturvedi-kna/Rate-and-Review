@@ -47,7 +47,11 @@ def create_order(
             timeout=10,
         )
         data = resp.json()
-        if resp.status_code in (200, 201) and (data.get("checkout_url") or data.get("status") == "success"):
+        if resp.status_code in (200, 201) and (data.get("checkout_url") or data.get("status") == "success" or "data" in data):
+            # Flatten nested data if present (FamGateway returns fields inside data object)
+            if isinstance(data.get("data"), dict):
+                merged = {**data, **data["data"]}
+                return True, merged
             return True, data
         return False, data
     except Exception as exc:
