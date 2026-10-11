@@ -354,6 +354,8 @@ DASHBOARD_HTML = """
           </div>
         </div>
 
+        <div id="submit-feedback-box" class="hidden p-3.5 rounded-xl text-xs font-medium border mb-3"></div>
+
         <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
           <p id="cost-estimate" class="text-xs text-slate-400 font-mono text-center sm:text-left">
             Wallet Balance: <strong class="text-emerald-400">₹{{ "%.2f"|format(user.wallet_balance) }}</strong>
@@ -541,67 +543,57 @@ DASHBOARD_HTML = """
     const priceStandard = {{ prices.price_standard_review }};
     const userBalance = {{ user.wallet_balance }};
 
-    function detectAccounts(text) {
+    function showFeedback(type, message) {
+      const box = document.getElementById('submit-feedback-box');
+      if (!box) return;
+      box.className = 'p-3.5 rounded-xl text-xs font-medium border mb-3 block transition-all';
+      if (type === 'error') {
+        box.className += ' bg-red-950/70 border-red-500/40 text-red-300';
+        box.innerHTML = '<div class="flex items-start gap-2"><i class="fa-solid fa-circle-exclamation text-red-400 mt-0.5 shrink-0"></i><div>' + message + '</div></div>';
+      } else if (type === 'warning') {
+        box.className += ' bg-amber-950/70 border-amber-500/40 text-amber-300';
+        box.innerHTML = '<div class="flex items-start gap-2"><i class="fa-solid fa-triangle-exclamation text-amber-400 mt-0.5 shrink-0"></i><div>' + message + '</div></div>';
+      } else if (type === 'success') {
+        box.className += ' bg-emerald-950/70 border-emerald-500/40 text-emerald-300';
+        box.innerHTML = '<div class="flex items-start gap-2"><i class="fa-solid fa-circle-check text-emerald-400 mt-0.5 shrink-0"></i><div>' + message + '</div></div>';
+      } else {
+        box.className += ' bg-slate-900 border-slate-700 text-slate-300';
+        box.innerHTML = '<div class="flex items-start gap-2"><i class="fa-solid fa-info-circle text-blue-400 mt-0.5 shrink-0"></i><div>' + message + '</div></div>';
+      }
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function hideFeedback() {
+      const box = document.getElementById('submit-feedback-box');
+      if (box) box.className = 'hidden';
+    }
+
+    function parseAccountsClient(text) {
       if (!text) return [];
       text = text.trim();
       try {
         const parsed = JSON.parse(text);
-        if (Array.isArray(parsed)) return parsed.filter(x => x && (x.mobile || x.phone) && (x.xo || x.token));
-        if (typeof parsed === 'object' && (parsed.mobile || parsed.phone) && (parsed.xo || parsed.token)) return [parsed];
+        if (Array.isArray(parsed)) return parsed.filter(function(x) { return x && (x.mobile || x.phone); });
+        if (typeof parsed === 'object' && parsed && (parsed.mobile || parsed.phone)) return [parsed];
       } catch(e) {}
 
-      // Balanced brace scanner for concatenated / space / newline separated JSONs with nested objects
       const found = [];
-      let depth = 0;
-      let start = -1;
-      let inString = false;
-      let escape = false;
-
-      for (let i = 0; i < text.length; i++) {
-        const c = text[i];
-        if (c === '"' && !escape) {
-          inString = !inString;
-        } else if (c === '\\' && inString) {
-          escape = !escape;
-          continue;
-        } else if (!inString) {
-          if (c === '{') {
-            if (depth === 0) start = i;
-            depth++;
-          } else if (c === '}') {
-            depth--;
-            if (depth === 0 && start !== -1) {
-              const chunk = text.substring(start, i + 1);
-              try {
-                const obj = JSON.parse(chunk);
-                if (obj && (obj.mobile || obj.phone) && (obj.xo || obj.token)) {
-                  found.push(obj);
-                }
-              } catch(e) {}
-              start = -1;
-            }
-          }
-        }
-        escape = false;
-      }
-
-      if (found.length > 0) return found;
-
-      // Fallback: line by line
-      for (const line of text.split('\n')) {
-        const l = line.trim().replace(/,$/, '');
+      const lines = text.split(String.fromCharCode(10));
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i].trim().replace(/,$/, '');
         if (l.startsWith('{') && l.endsWith('}')) {
           try {
             const obj = JSON.parse(l);
-            if (obj && (obj.mobile || obj.phone) && (obj.xo || obj.token)) found.push(obj);
+            if (obj && (obj.mobile || obj.phone)) found.push(obj);
           } catch(e) {}
         }
       }
-
       if (found.length > 0) return found;
 
-      const xoMatches = text.match(/"xo"\s*:/gi);
-      if (xoMatches) return Array(xoMatches.length).fill({mobile: "Account", xo: ""});
+      const xoMatches = text.match(/"xo"/gi) || text.match(/"token"/gi);
+      if (xoMatches) {
+        return new Array(xoMatches.length).fill({mobile: "Account", xo: ""});
+      }
       return [];
     }
 
@@ -626,26 +618,29 @@ DASHBOARD_HTML = """
     }
 
     function updateCostEstimate() {
-      const text = document.getElementById('json-input').value;
-      const accounts = detectAccounts(text);
+      const input = document.getElementById('json-input');
+      if (!input) return;
+      const text = input.value;
+      const accounts = parseAccountsClient(text);
       const count = accounts.length;
       const serviceRadio = document.querySelector('input[name="service_type"]:checked');
       const serviceType = serviceRadio ? serviceRadio.value : 'auto_pilot';
       const pricePerItem = serviceType === 'auto_pilot' ? priceAutoPilot : priceStandard;
       const totalCost = count * pricePerItem;
       const costEl = document.getElementById('cost-estimate');
+      if (!costEl) return;
 
       if (count === 0) {
-        costEl.innerHTML = `Wallet Balance: <strong class="text-emerald-400">₹${userBalance.toFixed(2)}</strong>`;
+        costEl.innerHTML = 'Wallet Balance: <strong class="text-emerald-400">₹' + userBalance.toFixed(2) + '</strong>';
         return;
       }
 
       if (userBalance >= totalCost) {
         const remaining = userBalance - totalCost;
-        costEl.innerHTML = `<span class="text-emerald-400 font-semibold">✓ ${count} Account${count > 1 ? 's' : ''} detected</span> | Cost: <strong class="text-white">₹${totalCost.toFixed(2)}</strong> (₹${pricePerItem}/order) | Balance: <strong class="text-emerald-400">₹${userBalance.toFixed(2)}</strong> <span class="text-slate-400">(Remains: ₹${remaining.toFixed(2)})</span>`;
+        costEl.innerHTML = '<span class="text-emerald-400 font-semibold">✓ ' + count + ' Account' + (count > 1 ? 's' : '') + ' detected</span> | Cost: <strong class="text-white">₹' + totalCost.toFixed(2) + '</strong> (₹' + pricePerItem + '/order) | Balance: <strong class="text-emerald-400">₹' + userBalance.toFixed(2) + '</strong> <span class="text-slate-400">(Remains: ₹' + remaining.toFixed(2) + ')</span>';
       } else {
         const deficit = totalCost - userBalance;
-        costEl.innerHTML = `<span class="text-amber-400 font-semibold">⚠️ ${count} Account${count > 1 ? 's' : ''} detected</span> | Cost: <strong class="text-red-400">₹${totalCost.toFixed(2)}</strong> | Balance: <strong class="text-slate-300">₹${userBalance.toFixed(2)}</strong> <span class="text-red-400 font-bold block sm:inline mt-1 sm:mt-0 sm:ml-1.5">(Need ₹${deficit.toFixed(2)} more — <a href="/wallet" class="text-pink-400 underline font-bold hover:text-pink-300">Top Up Wallet</a>)</span>`;
+        costEl.innerHTML = '<span class="text-amber-400 font-semibold">⚠️ ' + count + ' Account' + (count > 1 ? 's' : '') + ' detected</span> | Cost: <strong class="text-red-400">₹' + totalCost.toFixed(2) + '</strong> | Balance: <strong class="text-slate-300">₹' + userBalance.toFixed(2) + '</strong> <span class="text-red-400 font-bold block sm:inline mt-1 sm:mt-0 sm:ml-1.5">(Need ₹' + deficit.toFixed(2) + ' more — <a href="/wallet" class="text-pink-400 underline font-bold hover:text-pink-300">Top Up Wallet</a>)</span>';
       }
     }
 
@@ -656,7 +651,7 @@ DASHBOARD_HTML = """
         document.getElementById('json-input').value = JSON.stringify(data, null, 2);
         updateCostEstimate();
       } catch (e) {
-        alert("Failed to load sample: " + e.message);
+        showFeedback('error', 'Failed to load sample: ' + e.message);
       }
     }
 
@@ -674,41 +669,45 @@ DASHBOARD_HTML = """
     }
 
     async function handleJobSubmit(e) {
-      e.preventDefault();
-      const rawText = document.getElementById('json-input').value.trim();
+      if (e && e.preventDefault) e.preventDefault();
+      hideFeedback();
+
+      const inputEl = document.getElementById('json-input');
+      const rawText = inputEl ? inputEl.value.trim() : '';
       if (!rawText) {
-        alert("Please paste your Meesho account JSON before submitting.");
+        showFeedback('error', 'Please paste your Meesho account JSON before submitting.');
         return;
       }
 
-      const accounts = detectAccounts(rawText);
-      const serviceType = document.querySelector('input[name="service_type"]:checked').value;
+      const accounts = parseAccountsClient(rawText);
+      const serviceRadio = document.querySelector('input[name="service_type"]:checked');
+      const serviceType = serviceRadio ? serviceRadio.value : 'auto_pilot';
       const ratingMode = document.getElementById('rating-mode').value;
-      const reviewMode = document.querySelector('input[name="review_mode"]:checked').value;
+      const reviewRadio = document.querySelector('input[name="review_mode"]:checked');
+      const reviewMode = reviewRadio ? reviewRadio.value : 'auto';
       const comments = document.getElementById('review-comments').value.trim();
 
       const pricePerItem = serviceType === 'auto_pilot' ? priceAutoPilot : priceStandard;
-      const estimatedCount = accounts.length || 1;
+      const estimatedCount = accounts.length > 0 ? accounts.length : 1;
       const totalCost = estimatedCount * pricePerItem;
 
       // 1. Client-side Wallet Balance Validation
       if (userBalance < totalCost) {
         const deficit = totalCost - userBalance;
-        if (confirm(`⚠️ Insufficient Wallet Balance!\n\nYou submitted ${estimatedCount} account(s) which requires ₹${totalCost.toFixed(2)} (₹${pricePerItem}/order), but your current balance is ₹${userBalance.toFixed(2)}.\n\nYou need to add ₹${deficit.toFixed(2)} to proceed.\n\nWould you like to open the Wallet top-up page now?`)) {
-          window.location.href = '/wallet';
-        }
+        showFeedback('error', '<strong>Insufficient Wallet Balance:</strong> You submitted ' + estimatedCount + ' account(s) costing ₹' + totalCost.toFixed(2) + ', but your current balance is ₹' + userBalance.toFixed(2) + '. You need ₹' + deficit.toFixed(2) + ' more. <a href="/wallet" class="underline font-bold text-pink-400 ml-1">Click here to Top Up Wallet &rarr;</a>');
         return;
       }
 
       // 2. Client-side Expired Token Detection for Fresh Accounts
       if (serviceType === 'standard_review') {
         const nowSec = Date.now() / 1000;
-        for (const acc of accounts) {
-          if (acc.xo) {
+        for (let i = 0; i < accounts.length; i++) {
+          const acc = accounts[i];
+          if (acc && acc.xo) {
             const exp = checkTokenExpiry(acc.xo);
             if (exp && nowSec >= exp) {
               const expDate = new Date(exp * 1000).toLocaleString();
-              alert(`⚠️ Expired JSON Session Token Detected (+91 ${acc.mobile || 'Account'})\n\nThis account's session token expired on ${expDate}.\n\nSince you selected "Fresh Accounts (Instant Review)", expired sessions cannot be processed directly.\n\nPlease select "Old Accounts (Auto-Refresh & Review)" to automatically refresh your session, or generate and paste fresh JSON tokens.`);
+              showFeedback('warning', '<strong>Expired JSON Detected:</strong> Account (+91 ' + (acc.mobile || 'Account') + ') session token expired on ' + expDate + '.<br>Because you selected <em>Fresh Accounts (Instant Review)</em>, expired sessions cannot be used directly.<br>&rarr; Please select <strong>"Old Accounts (Auto-Refresh & Review)"</strong> above to automatically refresh it, or generate and paste fresh JSON tokens.');
               return;
             }
           }
@@ -716,8 +715,12 @@ DASHBOARD_HTML = """
       }
 
       const btn = document.getElementById('btn-submit');
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing & Submitting...';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i> Submitting & Starting...';
+      }
+
+      showFeedback('info', '<div class="flex items-center gap-2"><i class="fa-solid fa-spinner fa-spin text-pink-500"></i><span>Submitting your review tasks to server...</span></div>');
 
       try {
         const res = await fetch('/api/submit_jobs', {
@@ -733,27 +736,33 @@ DASHBOARD_HTML = """
         });
         const data = await res.json();
         if (data.success) {
-          alert(`✅ Successfully scheduled ${data.task_count} review task(s)!\nTotal deducted: ₹${data.total_cost.toFixed(2)}`);
-          location.reload();
+          showFeedback('success', '<strong>Success!</strong> Scheduled ' + data.task_count + ' review task(s). Total deducted: ₹' + data.total_cost.toFixed(2) + '. Reloading dashboard...');
+          setTimeout(function() {
+            location.reload();
+          }, 1200);
         } else {
-          alert("Submission Error:\n\n" + (data.error || "Submission failed. Please verify your inputs."));
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fa-solid fa-play"></i> Submit & Start Reviewing';
+          showFeedback('error', '<strong>Submission Failed:</strong> ' + (data.error || 'Server rejected the submission. Please check inputs.'));
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-play mr-1.5"></i> Submit & Start Reviewing';
+          }
         }
       } catch (err) {
-        alert("Connection Error:\n\n" + err.message);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fa-solid fa-play"></i> Submit & Start Reviewing';
+        showFeedback('error', '<strong>Network Error:</strong> ' + (err.message || 'Could not reach server. Please check internet connection.'));
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-play mr-1.5"></i> Submit & Start Reviewing';
+        }
       }
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', function() {
       const inputEl = document.getElementById('json-input');
       if (inputEl) {
         inputEl.addEventListener('input', updateCostEstimate);
-        inputEl.addEventListener('paste', () => setTimeout(updateCostEstimate, 50));
+        inputEl.addEventListener('paste', function() { setTimeout(updateCostEstimate, 50); });
       }
-      document.querySelectorAll('input[name="service_type"]').forEach(r => {
+      document.querySelectorAll('input[name="service_type"]').forEach(function(r) {
         r.addEventListener('change', updateCostEstimate);
       });
       updateCostEstimate();
@@ -1768,7 +1777,10 @@ def api_sample():
 @app.route("/api/submit_jobs", methods=["POST"])
 @login_required
 def api_submit_jobs():
-    if is_rate_limited(f"submit_jobs_{session['user_id']}", max_calls=10, window_secs=60):
+    user_id = session.get("user_id")
+    print(f"[API] >>> Received job submission from user #{user_id}", flush=True)
+    if is_rate_limited(f"submit_jobs_{user_id}", max_calls=10, window_secs=60):
+        print(f"[API] Rate limited for user #{user_id}", flush=True)
         return jsonify({"success": False, "error": "Too many submission attempts. Please wait a moment."}), 429
 
     data = request.json or {}
@@ -1779,20 +1791,22 @@ def api_submit_jobs():
     comments = str(data.get("comments", "")).strip()
 
     accounts = parse_multi_jsons(raw_text)
+    print(f"[API] User #{user_id} parsed {len(accounts)} accounts. Service: {service_type}", flush=True)
     if not accounts:
-        return jsonify({"success": False, "error": "No valid accounts with mandatory 'mobile' and 'xo' were parsed."})
+        return jsonify({"success": False, "error": "No valid accounts with mandatory 'mobile' and 'xo' were parsed."}), 400
 
     if len(accounts) > 100:
-        return jsonify({"success": False, "error": "Batch limit exceeded. Maximum 100 accounts allowed per submission."})
+        return jsonify({"success": False, "error": "Batch limit exceeded. Maximum 100 accounts allowed per submission."}), 400
 
     res = dispatch_batch_tasks(
-        user_id=session["user_id"],
+        user_id=user_id,
         accounts=accounts,
         service_type=service_type,
         rating_mode=rating_mode,
         review_mode=review_mode,
         custom_comments=comments,
     )
+    print(f"[API] Dispatch result for user #{user_id}: success={res.get('success')}, error={res.get('error')}", flush=True)
     status_code = 200 if res.get("success") else 400
     return jsonify(res), status_code
 
