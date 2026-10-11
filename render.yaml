@@ -13,16 +13,15 @@ services:
         generateValue: true
       - key: DATABASE_URL
         sync: false
-      - key: TELEGRAM_API_ID
-        sync: false
-      - key: TELEGRAM_API_HASH
+      - key: ADMIN_PASSWORD
         sync: false
       - key: TELEGRAM_STRING_SESSION
         sync: false
+      - key: TELEGRAM_API_ID
+        value: "35009041"
+      - key: TELEGRAM_API_HASH
+        value: "c0cc7d04faca251fbb0f8739927779b1"
       - key: FAMGATEWAY_API_KEY
         sync: false
       - key: INDIAN_PROXY
         sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
-
