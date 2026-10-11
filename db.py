@@ -1,9 +1,10 @@
 import os
 import hashlib
+import urllib.parse
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
-DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL") or ""
+DATABASE_URL = (os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL") or "").strip()
 DB_FILE = os.environ.get("DB_FILE", "meesho_studio.db")
 
 IS_POSTGRES = bool(
@@ -18,6 +19,23 @@ if IS_POSTGRES:
     # Normalize url scheme if necessary
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+    # Clean query parameters unsupported by psycopg2 / libpq (e.g. pgbouncer=true)
+    try:
+        parsed_url = urllib.parse.urlparse(DATABASE_URL)
+        if parsed_url.query:
+            allowed_params = {
+                "sslmode", "sslcert", "sslkey", "sslrootcert",
+                "connect_timeout", "application_name", "options",
+                "target_session_attrs", "keepalives", "keepalives_idle"
+            }
+            query_pairs = urllib.parse.parse_qsl(parsed_url.query)
+            valid_query = [pair for pair in query_pairs if pair[0].lower() in allowed_params]
+            new_query = urllib.parse.urlencode(valid_query)
+            DATABASE_URL = urllib.parse.urlunparse(parsed_url._replace(query=new_query))
+    except Exception:
+        if "pgbouncer=" in DATABASE_URL:
+            DATABASE_URL = DATABASE_URL.split("?pgbouncer=")[0].split("&pgbouncer=")[0]
 else:
     import sqlite3
 
