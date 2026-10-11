@@ -22,6 +22,11 @@ try:
 except ImportError:
     otpless_auth = None
 
+try:
+    import proxy_manager
+except ImportError:
+    proxy_manager = None
+
 # Ensure UTF-8 output on Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -98,6 +103,14 @@ class MeeshoSession:
         api_host = self.data.get("api_host") or DEFAULT_API_HOST
         if not api_host.startswith("http"):
             api_host = f"https://{api_host}"
+
+        if proxy_manager:
+            try:
+                proxies = proxy_manager.get_meesho_proxies()
+                if proxies:
+                    client.proxies = proxies
+            except Exception:
+                pass
 
         return client, api_host
 
@@ -178,13 +191,23 @@ def request_json(
     auto_retry: bool = True,
 ) -> dict:
     url = f"{sess.base_url}{path}"
-    response = sess.client.request(
-        method=method,
-        url=url,
-        json=payload,
-        timeout=TIMEOUT,
-        allow_redirects=False,
-    )
+    if proxy_manager:
+        response = proxy_manager.request_with_retry(
+            session=sess.client,
+            method=method,
+            url=url,
+            json=payload,
+            timeout=TIMEOUT,
+            allow_redirects=False,
+        )
+    else:
+        response = sess.client.request(
+            method=method,
+            url=url,
+            json=payload,
+            timeout=TIMEOUT,
+            allow_redirects=False,
+        )
 
     if response.status_code == 401:
         proxy_code = response.headers.get("x-proxy-auth-failure-code", "")

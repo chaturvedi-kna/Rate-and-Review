@@ -96,7 +96,7 @@ def validate_account(session_data: dict) -> Dict[str, Any]:
 
     # Step 1: Check user profile
     try:
-        resp = client.get(f"{base_url}/api/1.0/user-profile", timeout=TIMEOUT)
+        resp = proxy_manager.request_with_retry(client, "GET", f"{base_url}/api/1.0/user-profile", timeout=TIMEOUT)
         proxy_code = resp.headers.get("x-proxy-auth-failure-code")
         result["proxy_code"] = proxy_code
 
@@ -138,7 +138,7 @@ def validate_account(session_data: dict) -> Dict[str, Any]:
             },
             "user_id": user_id,
         }
-        r_orders = client.post(f"{base_url}/api/3.0/user/orders", json=orders_payload, timeout=TIMEOUT)
+        r_orders = proxy_manager.request_with_retry(client, "POST", f"{base_url}/api/3.0/user/orders", json=orders_payload, timeout=TIMEOUT)
         if r_orders.status_code == 200:
             orders_data = r_orders.json()
             sub_orders = orders_data.get("sub_order_list") or []
@@ -215,7 +215,14 @@ def submit_review_full(
 
     def api_call(method: str, path: str, payload: dict = None, allow_retry: bool = True) -> dict:
         url = f"{base_url}{path}"
-        r = client.request(method=method, url=url, json=payload, timeout=TIMEOUT)
+        r = proxy_manager.request_with_retry(
+            session=client,
+            method=method,
+            url=url,
+            json=payload,
+            timeout=TIMEOUT,
+            log_callback=log,
+        )
 
         if r.status_code == 401 and allow_retry and auto_refresh:
             p_code = r.headers.get("x-proxy-auth-failure-code", "")
