@@ -4,6 +4,22 @@ import urllib.parse
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
+# Automatically load local .env if present
+_env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_file):
+    try:
+        with open(_env_file, "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    _k = _k.strip()
+                    _v = _v.strip().strip("'\"")
+                    if _k not in os.environ:
+                        os.environ[_k] = _v
+    except Exception:
+        pass
+
 DATABASE_URL = (os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL") or "").strip()
 DB_FILE = os.environ.get("DB_FILE", "meesho_studio.db")
 

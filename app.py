@@ -612,221 +612,266 @@ WALLET_HTML = """
           </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-          <!-- QR Code Display -->
-          <div class="md:col-span-5 flex flex-col items-center justify-center p-6 bg-slate-950 border border-slate-800 rounded-2xl">
-            <img id="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa={{ settings.upi_id }}%26pn={{ settings.upi_name }}%26cu=INR" alt="UPI QR" class="w-48 h-48 rounded-xl bg-white p-2">
-            <p class="text-[11px] text-slate-400 mt-3 font-medium text-center">Scan with any UPI App (GPay, PhonePe, Paytm)</p>
-          </div>
-
-          <!-- Manual Form -->
-          <div class="md:col-span-7 space-y-4">
-            <div class="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
-              <span class="text-[11px] text-slate-400 block font-medium">Receiver UPI ID:</span>
-              <div class="flex items-center justify-between">
-                <span id="upi-id-text" class="text-sm font-mono text-pink-400 font-bold">{{ settings.upi_id }}</span>
-                <button onclick="copyUPI()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg border border-slate-700 transition">
-                  <i class="fa-regular fa-copy mr-1"></i> Copy
-                </button>
-              </div>
-              <span class="text-[10px] text-slate-500 block">Name: {{ settings.upi_name }}</span>
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
+            <!-- QR Code Display -->
+            <div class="md:col-span-5 flex flex-col items-center justify-center p-6 bg-slate-950 border border-slate-800 rounded-2xl">
+              <img id="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa={{ settings.upi_id }}%26pn={{ settings.upi_name|default('Meesho')|replace(' ', '%20') }}%26cu=INR" alt="UPI QR" class="w-48 h-48 rounded-xl bg-white p-2">
+              <p class="text-[11px] text-slate-400 mt-3 font-medium text-center">Scan with any UPI App (GPay, PhonePe, Paytm)</p>
             </div>
 
-            <form onsubmit="handleManualTopupSubmit(event)" class="space-y-3.5">
-              <div>
-                <label class="block text-xs font-semibold text-slate-300 mb-1">Transferred Amount (₹):</label>
-                <input type="number" id="manual-deposit-amount" min="{{ settings.min_topup_amount }}" step="1" required value="{{ settings.min_topup_amount }}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-emerald-400 focus:outline-none focus:border-pink-500">
+            <!-- Manual Form -->
+            <div class="md:col-span-7 space-y-4">
+              <div class="bg-slate-950/70 border border-slate-800 p-4 rounded-xl space-y-2">
+                <span class="text-[11px] text-slate-400 block font-medium">Receiver UPI ID:</span>
+                <div class="flex items-center justify-between">
+                  <span id="upi-id-text" class="text-sm font-mono text-pink-400 font-bold">{{ settings.upi_id }}</span>
+                  <button type="button" onclick="copyUPI()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg border border-slate-700 transition cursor-pointer">
+                    <i class="fa-regular fa-copy mr-1"></i> Copy
+                  </button>
+                </div>
+                <span class="text-[10px] text-slate-500 block">Name: {{ settings.upi_name }}</span>
               </div>
 
-              <div>
-                <label class="block text-xs font-semibold text-slate-300 mb-1">12-Digit UPI UTR Reference Number:</label>
-                <input type="text" id="manual-deposit-utr" required placeholder="e.g. 428190348123" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-pink-500">
-                <p class="text-[10px] text-slate-500 mt-0.5">Found in your payment receipt inside GPay, PhonePe, or Paytm.</p>
-              </div>
+              <form id="manual-topup-form" onsubmit="handleManualTopupSubmit(event)" class="space-y-3.5">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-300 mb-1">Transferred Amount (₹):</label>
+                  <input type="number" id="manual-deposit-amount" min="{{ settings.min_topup_amount }}" step="1" required value="{{ settings.min_topup_amount }}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-emerald-400 focus:outline-none focus:border-pink-500">
+                </div>
 
-              <button type="submit" id="btn-manual-deposit" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-2">
-                <i class="fa-solid fa-receipt"></i>
-                Submit UTR for Verification
-              </button>
-            </form>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-300 mb-1">12-Digit UPI UTR Reference Number:</label>
+                  <input type="text" id="manual-deposit-utr" required placeholder="e.g. 428190348123" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-pink-500">
+                  <p class="text-[10px] text-slate-500 mt-0.5">Found in your payment receipt inside GPay, PhonePe, or Paytm.</p>
+                </div>
+
+                <button type="submit" id="btn-manual-deposit" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer">
+                  <i class="fa-solid fa-receipt"></i>
+                  Submit UTR for Verification
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <div class="text-center pt-1">
+            <button type="button" onclick="switchTopupMethod('auto')" class="text-xs text-slate-400 hover:text-white transition cursor-pointer">
+              &larr; Back to Instant Automated UPI
+            </button>
           </div>
         </div>
+      </div>
 
-        <div class="text-center pt-1">
-          <button type="button" onclick="switchTopupMethod('auto')" class="text-xs text-slate-400 hover:text-white transition">
-            &larr; Back to Instant Automated UPI
-          </button>
+      <!-- Transaction History Table -->
+      <div class="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+        <div class="px-6 py-4 border-b border-slate-800 bg-slate-900">
+          <h4 class="text-sm font-semibold text-white">Wallet Transactions History</h4>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse font-sans">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400 bg-slate-950/40">
+                <th class="p-3.5">Type</th>
+                <th class="p-3.5">Amount</th>
+                <th class="p-3.5">Reference / Notes</th>
+                <th class="p-3.5">Status</th>
+                <th class="p-3.5 text-right">Date & Time</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60 font-sans">
+              {% if transactions %}
+                {% for tx in transactions %}
+                <tr class="hover:bg-slate-900/40 transition">
+                  <td class="p-3.5">
+                    {% if tx.type == 'DEPOSIT' %}
+                      <span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">UPI Deposit</span>
+                    {% elif tx.type == 'BONUS' %}
+                      <span class="px-2 py-0.5 rounded text-[10px] bg-pink-500/10 text-pink-400 border border-pink-500/20 font-semibold">Bonus</span>
+                    {% elif tx.type == 'REFUND' %}
+                      <span class="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">Refund</span>
+                    {% elif tx.type == 'MANUAL_CREDIT' %}
+                      <span class="px-2 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 font-semibold">Admin Credit</span>
+                    {% else %}
+                      <span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 border border-slate-700">Review Fee</span>
+                    {% endif %}
+                  </td>
+                  <td class="p-3.5 font-mono font-bold {% if tx.type in ('DEPOSIT', 'BONUS', 'REFUND', 'MANUAL_CREDIT') %}text-emerald-400{% else %}text-slate-300{% endif %}">
+                    {% if tx.type in ('DEPOSIT', 'BONUS', 'REFUND', 'MANUAL_CREDIT') %}+{% else %}-{% endif %}₹{{ "%.2f"|format(tx.amount) }}
+                  </td>
+                  <td class="p-3.5 text-slate-300">
+                    {{ tx.notes or '-' }}
+                    {% if tx.utr_ref %}<span class="block text-[10px] text-slate-500 font-mono">UTR: {{ tx.utr_ref }}</span>{% endif %}
+                  </td>
+                  <td class="p-3.5">
+                    {% if tx.status == 'COMPLETED' %}
+                      <span class="text-emerald-400 font-medium"><i class="fa-solid fa-check mr-1"></i>Completed</span>
+                    {% elif tx.status == 'PENDING' %}
+                      <span class="text-amber-400 font-medium"><i class="fa-solid fa-clock mr-1"></i>Verifying</span>
+                    {% else %}
+                      <span class="text-red-400 font-medium"><i class="fa-solid fa-xmark mr-1"></i>Rejected</span>
+                    {% endif %}
+                  </td>
+                  <td class="p-3.5 text-right text-slate-400 font-mono text-[11px]">{{ tx.created_at[:16].replace('T', ' ') }}</td>
+                </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="5" class="p-6 text-center text-slate-500">No transactions recorded yet.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
         </div>
       </div>
-    </div>
 
-    <!-- Transaction History Table -->
-    <div class="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
-      <div class="px-6 py-4 border-b border-slate-800 bg-slate-900">
-        <h4 class="text-sm font-semibold text-white">Wallet Transactions History</h4>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-xs border-collapse font-sans">
-          <thead>
-            <tr class="border-b border-slate-800 text-slate-400 bg-slate-950/40">
-              <th class="p-3.5">Type</th>
-              <th class="p-3.5">Amount</th>
-              <th class="p-3.5">Reference / Notes</th>
-              <th class="p-3.5">Status</th>
-              <th class="p-3.5 text-right">Date & Time</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-800/60 font-sans">
-            {% if transactions %}
-              {% for tx in transactions %}
-              <tr class="hover:bg-slate-900/40 transition">
-                <td class="p-3.5">
-                  {% if tx.type == 'DEPOSIT' %}
-                    <span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">UPI Deposit</span>
-                  {% elif tx.type == 'BONUS' %}
-                    <span class="px-2 py-0.5 rounded text-[10px] bg-pink-500/10 text-pink-400 border border-pink-500/20 font-semibold">Bonus</span>
-                  {% elif tx.type == 'REFUND' %}
-                    <span class="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">Refund</span>
-                  {% elif tx.type == 'MANUAL_CREDIT' %}
-                    <span class="px-2 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 font-semibold">Admin Credit</span>
-                  {% else %}
-                    <span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 border border-slate-700">Review Fee</span>
-                  {% endif %}
-                </td>
-                <td class="p-3.5 font-mono font-bold {% if tx.type in ('DEPOSIT', 'BONUS', 'REFUND', 'MANUAL_CREDIT') %}text-emerald-400{% else %}text-slate-300{% endif %}">
-                  {% if tx.type in ('DEPOSIT', 'BONUS', 'REFUND', 'MANUAL_CREDIT') %}+{% else %}-{% endif %}₹{{ "%.2f"|format(tx.amount) }}
-                </td>
-                <td class="p-3.5 text-slate-300">
-                  {{ tx.notes or '-' }}
-                  {% if tx.utr_ref %}<span class="block text-[10px] text-slate-500 font-mono">UTR: {{ tx.utr_ref }}</span>{% endif %}
-                </td>
-                <td class="p-3.5">
-                  {% if tx.status == 'COMPLETED' %}
-                    <span class="text-emerald-400 font-medium"><i class="fa-solid fa-check mr-1"></i>Completed</span>
-                  {% elif tx.status == 'PENDING' %}
-                    <span class="text-amber-400 font-medium"><i class="fa-solid fa-clock mr-1"></i>Verifying</span>
-                  {% else %}
-                    <span class="text-red-400 font-medium"><i class="fa-solid fa-xmark mr-1"></i>Rejected</span>
-                  {% endif %}
-                </td>
-                <td class="p-3.5 text-right text-slate-400 font-mono text-[11px]">{{ tx.created_at[:16].replace('T', ' ') }}</td>
-              </tr>
-              {% endfor %}
-            {% else %}
-              <tr>
-                <td colspan="5" class="p-6 text-center text-slate-500">No transactions recorded yet.</td>
-              </tr>
-            {% endif %}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    </main>
 
-  </main>
+    <script>
+      const MIN_TOPUP = parseFloat("{{ settings.min_topup_amount }}") || 50;
 
-  <script>
-    const MIN_TOPUP = parseFloat("{{ settings.min_topup_amount }}");
+      function switchTopupMethod(method) {
+        console.log("Switching topup method to:", method);
+        const autoSec = document.getElementById('section-auto-topup');
+        const manualSec = document.getElementById('section-manual-topup');
+        const tabAuto = document.getElementById('tab-auto');
+        const tabManual = document.getElementById('tab-manual');
 
-    function switchTopupMethod(method) {
-      const autoSec = document.getElementById('section-auto-topup');
-      const manualSec = document.getElementById('section-manual-topup');
-      const tabAuto = document.getElementById('tab-auto');
-      const tabManual = document.getElementById('tab-manual');
-
-      if (method === 'manual') {
-        autoSec.classList.add('hidden');
-        manualSec.classList.remove('hidden');
-        tabAuto.className = 'px-3.5 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white';
-        tabManual.className = 'px-3.5 py-1.5 rounded-lg font-semibold transition bg-amber-600 text-white shadow';
-      } else {
-        manualSec.classList.add('hidden');
-        autoSec.classList.remove('hidden');
-        tabAuto.className = 'px-3.5 py-1.5 rounded-lg font-semibold transition bg-pink-600 text-white shadow';
-        tabManual.className = 'px-3.5 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white';
-      }
-    }
-
-    function setAutoAmount(val) {
-      document.getElementById('auto-deposit-amount').value = val;
-    }
-
-    function copyUPI() {
-      const text = document.getElementById('upi-id-text').innerText;
-      navigator.clipboard.writeText(text);
-      alert("UPI ID copied: " + text);
-    }
-
-    async function payWithFamGateway() {
-      const amount = parseFloat(document.getElementById('auto-deposit-amount').value);
-      if (amount < MIN_TOPUP) {
-        alert(`Minimum top-up amount is ₹${MIN_TOPUP}`);
-        return;
-      }
-      const btn = document.getElementById('btn-famgateway');
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Initializing Checkout...';
-
-      try {
-        const res = await fetch('/api/famgateway/initiate', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ amount: amount })
-        });
-        const d = await res.json();
-        if (d.success && d.checkout_url) {
-          window.location.href = d.checkout_url;
+        if (method === 'manual') {
+          if (autoSec) autoSec.classList.add('hidden');
+          if (manualSec) manualSec.classList.remove('hidden');
+          if (tabAuto) tabAuto.className = 'px-3.5 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white cursor-pointer';
+          if (tabManual) tabManual.className = 'px-3.5 py-1.5 rounded-lg font-semibold transition bg-amber-600 text-white shadow cursor-pointer';
         } else {
-          alert(d.error || "Failed to initialize payment gateway. Please use Manual UPI Transfer.");
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Proceed to Instant UPI Checkout';
+          if (manualSec) manualSec.classList.add('hidden');
+          if (autoSec) autoSec.classList.remove('hidden');
+          if (tabAuto) tabAuto.className = 'px-3.5 py-1.5 rounded-lg font-semibold transition bg-pink-600 text-white shadow cursor-pointer';
+          if (tabManual) tabManual.className = 'px-3.5 py-1.5 rounded-lg font-medium transition text-slate-400 hover:text-white cursor-pointer';
         }
-      } catch (err) {
-        alert("Error: " + err.message + "\nPlease use Manual UPI Transfer if gateway is unavailable.");
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Proceed to Instant UPI Checkout';
-      }
-    }
-
-    async function handleManualTopupSubmit(e) {
-      e.preventDefault();
-      const amount = parseFloat(document.getElementById('manual-deposit-amount').value);
-      const utr = document.getElementById('manual-deposit-utr').value.trim();
-
-      if (amount < MIN_TOPUP) {
-        alert(`Minimum top-up amount is ₹${MIN_TOPUP}`);
-        return;
-      }
-      if (!utr || utr.length < 6) {
-        alert("Please enter a valid 12-digit UPI UTR reference number.");
-        return;
       }
 
-      const btn = document.getElementById('btn-manual-deposit');
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
+      function setAutoAmount(val) {
+        const el = document.getElementById('auto-deposit-amount');
+        if (el) el.value = val;
+      }
 
-      try {
-        const res = await fetch('/api/deposit', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ amount: amount, utr: utr })
-        });
-        const data = await res.json();
-        if (data.success) {
-          alert("Payment request submitted! Admin will verify and credit your wallet shortly.");
-          location.reload();
+      function copyUPI() {
+        const el = document.getElementById('upi-id-text');
+        const text = el ? el.innerText.trim() : '';
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(() => {
+            alert("UPI ID copied: " + text);
+          }).catch(() => {
+            prompt("Copy UPI ID:", text);
+          });
         } else {
-          alert(data.error || "Deposit submission failed.");
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fa-solid fa-receipt"></i> Submit UTR for Verification';
+          prompt("Copy UPI ID:", text);
         }
-      } catch (err) {
-        alert("Error: " + err.message);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fa-solid fa-receipt"></i> Submit UTR for Verification';
       }
-    }
-  </script>
+
+      async function payWithFamGateway() {
+        console.log("payWithFamGateway triggered");
+        const amountInput = document.getElementById('auto-deposit-amount');
+        const amount = parseFloat(amountInput ? amountInput.value : 0);
+        if (isNaN(amount) || amount < MIN_TOPUP) {
+          alert("Minimum top-up amount is ₹" + MIN_TOPUP);
+          return;
+        }
+        const btn = document.getElementById('btn-famgateway');
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Initializing Checkout...';
+        }
+
+        try {
+          const res = await fetch('/api/famgateway/initiate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ amount: amount })
+          });
+          const d = await res.json();
+          if (d.success && d.checkout_url) {
+            window.location.href = d.checkout_url;
+          } else {
+            alert((d.error || "Failed to initialize payment gateway.") + " Please use Manual UPI Transfer if gateway is unavailable.");
+            if (btn) {
+              btn.disabled = false;
+              btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Proceed to Instant UPI Checkout';
+            }
+          }
+        } catch (err) {
+          alert("Error: " + err.message + ". Please use Manual UPI Transfer if gateway is unavailable.");
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Proceed to Instant UPI Checkout';
+          }
+        }
+      }
+
+      async function handleManualTopupSubmit(e) {
+        if (e) e.preventDefault();
+        console.log("handleManualTopupSubmit triggered");
+        const amountInput = document.getElementById('manual-deposit-amount');
+        const amount = parseFloat(amountInput ? amountInput.value : 0);
+        const utrInput = document.getElementById('manual-deposit-utr');
+        const utr = utrInput ? utrInput.value.trim() : '';
+
+        if (isNaN(amount) || amount < MIN_TOPUP) {
+          alert("Minimum top-up amount is ₹" + MIN_TOPUP);
+          return;
+        }
+        if (!utr || utr.length < 6) {
+          alert("Please enter a valid 12-digit UPI UTR reference number.");
+          return;
+        }
+
+        const btn = document.getElementById('btn-manual-deposit');
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
+        }
+
+        try {
+          const res = await fetch('/api/deposit', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ amount: amount, utr: utr })
+          });
+          const data = await res.json();
+          if (data.success) {
+            alert("Payment request submitted! Admin will verify and credit your wallet shortly.");
+            location.reload();
+          } else {
+            alert(data.error || "Deposit submission failed.");
+            if (btn) {
+              btn.disabled = false;
+              btn.innerHTML = '<i class="fa-solid fa-receipt"></i> Submit UTR for Verification';
+            }
+          }
+        } catch (err) {
+          alert("Error: " + err.message);
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-receipt"></i> Submit UTR for Verification';
+          }
+        }
+      }
+
+      window.switchTopupMethod = switchTopupMethod;
+      window.setAutoAmount = setAutoAmount;
+      window.copyUPI = copyUPI;
+      window.payWithFamGateway = payWithFamGateway;
+      window.handleManualTopupSubmit = handleManualTopupSubmit;
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const tabAuto = document.getElementById('tab-auto');
+        const tabManual = document.getElementById('tab-manual');
+        const btnFam = document.getElementById('btn-famgateway');
+        const manualForm = document.getElementById('manual-topup-form');
+
+        if (tabAuto) tabAuto.addEventListener('click', () => switchTopupMethod('auto'));
+        if (tabManual) tabManual.addEventListener('click', () => switchTopupMethod('manual'));
+        if (btnFam) btnFam.addEventListener('click', payWithFamGateway);
+        if (manualForm) manualForm.addEventListener('submit', handleManualTopupSubmit);
+      });
+    </script>
 </body>
 </html>
 """
